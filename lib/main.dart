@@ -5,6 +5,18 @@ import 'package:csv/csv.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 
+// Unit: meters
+class StoreDimensions {
+  // Notice that it says firstFloor and continuing, but the first floor corresponds to floor 0
+  // english vs normal floor counting
+  static const double firstFloorWidth = 20;
+  static const double firstFloorHeight = 20;
+  static const double secondFloorWidth = 20;
+  static const double secondFloorHeight = 20;
+  static const double thirdFloorWidth = 20;
+  static const double thirdFloorHeight = 20;
+}
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
@@ -16,14 +28,14 @@ void main() async {
   print("config: ${configDir}");
 
   File layoutFile = File("${configDir.path}/layout.csv");
-  if (!layoutFile.existsSync() || true) {
+  if (!layoutFile.existsSync() || true) { // TODO: Remember to delete || true
     print("Layout file created");
     layoutFile.createSync(recursive: true, exclusive: false); // TODO: Remember to change exclusive: true
     layoutFile.writeAsStringSync("id;floor;x0;y0;a;b\n0;0;0.5;0.7;5;5"); // TODO: Delete mock up data
   }
 
   File productFile = File("${configDir.path}/products.csv");
-  if (!productFile.existsSync() || true) {
+  if (!productFile.existsSync() || true) { // TODO: Remember to delete || true
     print("Product file created");
     productFile.createSync(recursive: true, exclusive: false); // TODO: Remember to change exclusive: true
     productFile.writeAsStringSync("product_id;layout_id\n0000456001;0"); // TODO: Delete mock up data
@@ -96,6 +108,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     print(fields[0][2].runtimeType);
     print(fields[0][3]);
     print(fields[0][3].runtimeType);
+    // TODO: maybe do some filtering here, because of floors
     return fields;
   }
 
@@ -109,31 +122,33 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     print("Raw: $fields");
     print(fields[0][0].runtimeType);
     print(fields[0][1].runtimeType);
-    List<List> transformedFields = fields.map((List product) {
-      int productId = product[0];
-      int layoutId = product[1];
-      if (productId < 10) {
-        return ["000000000${productId}", layoutId];
-      } else if (productId < 100) {
-        return ["00000000${productId}", layoutId];
-      } else if (productId < 1_000) {
-        return ["0000000${productId}", layoutId];
-      } else if (productId < 10_000) {
-        return ["000000${productId}", layoutId];
-      } else if (productId < 100_000) {
-        return ["00000${productId}", layoutId];
-      } else if (productId < 1_000_000) {
-        return ["0000${productId}", layoutId];
-      } else if (productId < 10_000_000) {
-        return ["000${productId}", layoutId];
-      } else if (productId < 100_000_000) {
-        return ["00${productId}", layoutId];
-      } else if (productId < 1_000_000_000) {
-        return ["0${productId}", layoutId];
-      } else {
-        return [productId.toString(), layoutId];
-      }
-    }).toList();
+    List<List> transformedFields = fields
+      .map((List product) {
+        int productId = product[0];
+        int layoutId = product[1];
+        String zeros = "";
+        if (productId < 10) {
+          zeros = "0" * 9;
+        } else if (productId < 100) {
+          zeros = "0" * 8;
+        } else if (productId < 1_000) {
+          zeros = "0" * 7;
+        } else if (productId < 10_000) {
+          zeros = "0" * 6;
+        } else if (productId < 100_000) {
+          zeros = "0" * 5;
+        } else if (productId < 1_000_000) {
+          zeros = "0" * 4;
+        } else if (productId < 10_000_000) {
+          zeros = "0" * 3;
+        } else if (productId < 100_000_000) {
+          zeros = "0" * 2;
+        } else if (productId < 1_000_000_000) {
+          zeros = "0" * 1;
+        }
+        return ["${zeros}${productId}", layoutId];
+    })
+    .toList();
     return transformedFields;
   }
 
@@ -227,7 +242,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
             layoutTable: layoutTable,
           ),
         ],
-      ) : Text("Loading screen"),
+      ) : Text("Loading ..."),
     );
   }
 }
@@ -243,12 +258,96 @@ class FloorLayout extends StatefulWidget {
 }
 
 class _FloorLayoutState extends State<FloorLayout> {
+  List<Rect> racks = [];
+
+  void onTapDown(TapDownDetails details) {
+    Offset tapPosition = details.localPosition;
+
+    for (int i = 0; i < racks.length; i++) {
+      if (racks[i].contains(tapPosition)) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => RackProductList(),
+          ),
+        );
+        print("Rectangle $i clicked!");
+        return;
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    racks = widget.layoutTable
+      .map((List rack) {
+        // All following values are given in meters.
+        double x0 = rack[2].toDouble();
+        double y0 = rack[3].toDouble();
+        double a = rack[4].toDouble();
+        double b = rack[5].toDouble();
+        // Now follows the conversion
+        double width = MediaQuery.sizeOf(context).width;
+        double height = MediaQuery.sizeOf(context).height;
+        x0 = width * x0 / StoreDimensions.firstFloorWidth;
+        y0 = height * y0 / StoreDimensions.firstFloorHeight;
+        a = width * a / StoreDimensions.firstFloorWidth;
+        b = height * b / StoreDimensions.firstFloorHeight;
+        return Rect.fromLTWH(x0, y0, a, b);
+      })
+      .toList();
+    // TODO: Convert real life coordinates into pixels
+
     // TODO: Rendering rectangles
     // TODO: Make rectangles clickable
-    // TODO: Click should render list of products on bar/rail
-    var x = widget.layoutTable[0].toString();
-    return Text(x);
+    // TODO: Click should render list of products on rack
+
+    return GestureDetector(
+      onTapDown: onTapDown,
+      child: CustomPaint(
+        painter: RackPainter(racks),
+        child: SizedBox.expand(), // Expands to fill the available space
+      ),
+    );
+  }
+}
+
+class RackPainter extends CustomPainter {
+  final List<Rect> racks;
+
+  RackPainter(this.racks);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    Paint paint = Paint()..color = Colors.grey.withValues(alpha: 0.5);
+
+    for (var rect in racks) {
+      canvas.drawRect(rect, paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(CustomPainter oldDelegate) => false;
+}
+
+class RackProductList extends StatefulWidget {
+  const RackProductList({super.key});
+
+  @override
+  State<RackProductList> createState() => _RackProductListState();
+}
+
+class _RackProductListState extends State<RackProductList> {
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: Text('Rectangle Details')),
+      body: Center( // TODO: ListView Builder or similar for product list
+        child: Text(
+          'Details of Rectangle',
+          style: TextStyle(fontSize: 24),
+        ),
+      ),
+    );
   }
 }
