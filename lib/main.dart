@@ -10,7 +10,7 @@ import 'package:path_provider/path_provider.dart';
 
 // Unit: meters
 class StoreDimensions {
-  // Notice that it says firstFloor and continuing, but the first floor corresponds to floor 0
+  // Notice that it says groundFloor and continuing, because the first floor corresponds to floor 1
   // american vs german floor counting
   static const double groundFloorWidth = 20;  // m
   static const double groundFloorHeight = 20;  // m
@@ -20,10 +20,41 @@ class StoreDimensions {
   static const double secondFloorHeight = 20;  // m
 }
 
+enum Floor {
+  ground,
+  first,
+  second
+}
+
+@immutable
+class LayoutInfo {
+  final int id;
+  final Floor floor;
+  final double x0;
+  final double y0;
+  final double a;
+  final double b;
+
+  const LayoutInfo({
+    required this.id,
+    required this.floor,
+    required this.x0,
+    required this.y0,
+    required this.a,
+    required this.b,
+  });
+
+  @override
+  String toString() {
+    // TODO: implement toString
+    return "{id: $id, floor: $floor, x0: $x0, y0: $y0, a: $a, b: $b}";
+  }
+}
+
 @immutable
 class RackInfo {
   final int id;
-  final int floor;
+  final Floor floor;
   final Rect rack;
 
   const RackInfo({required this.id, required this.floor, required this.rack});
@@ -106,8 +137,8 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
   late TabController _floors;
   bool layoutLoaded = false;
   bool productLoaded = false;
-  List<List> layoutTable = [];
-  List<List> productTable = [];
+  List<LayoutInfo> layoutList = [];
+  List<ProductInfo> productList = [];
   int wantedLayoutId = -1;
 
   @override
@@ -118,23 +149,44 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
 
   // TODO: Consider switching to dartframe https://pub.dev/packages/dartframe
 
-  Future<List<List>> _loadLayout() async {
+  Future<List<LayoutInfo>> _loadLayout() async {
     final stream = File(widget.layoutPath).openRead();
     final fields = await stream
-        .transform(utf8.decoder)
-        .transform(CsvToListConverter(fieldDelimiter: ";", eol: "\n"))
-        .skip(1)
-        .toList();
-    print("Inside of loadLayout: ${fields}");
-    print(fields[0][2]);
-    print(fields[0][2].runtimeType);
-    print(fields[0][3]);
-    print(fields[0][3].runtimeType);
+      .transform(utf8.decoder)
+      .transform(CsvToListConverter(fieldDelimiter: ";", eol: "\n"))
+      .skip(1)
+      .map((List layout) {
+        Floor floor = Floor.ground;
+        switch (layout[1]) {
+          case 0:
+            floor = Floor.ground;
+          case 1:
+            floor = Floor.first;
+          case 2:
+            floor = Floor.second;
+          default:
+            floor = Floor.ground;
+        }
+        return LayoutInfo(
+          id: layout[0],
+          floor: floor,
+          x0: layout[2].toDouble(),
+          y0: layout[3].toDouble(),
+          a: layout[4].toDouble(),
+          b: layout[5].toDouble(),
+        );
+      })
+      .toList();
+    print("Inside of loadLayout: $fields");
+    print(fields[0].x0);
+    print(fields[0].x0.runtimeType);
+    print(fields[0].y0);
+    print(fields[0].y0.runtimeType);
     // TODO: maybe do some filtering here, because of floors
     return fields;
   }
 
-  Future<List<List>> _loadProducts() async {
+  Future<List<ProductInfo>> _loadProducts() async {
     final stream = File(widget.productPath).openRead();
     final fields = await stream
         .transform(utf8.decoder)
@@ -144,10 +196,9 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     print("Raw: $fields");
     print(fields[0][0].runtimeType);
     print(fields[0][1].runtimeType);
-    List<List> transformedFields = fields
+    List<ProductInfo> transformedFields = fields
       .map((List product) {
         int productId = product[0];
-        int layoutId = product[1];
         String zeros = "";
         if (productId < 10) {
           zeros = "0" * 9;
@@ -168,25 +219,25 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
         } else if (productId < 1_000_000_000) {
           zeros = "0" * 1;
         }
-        return ["$zeros$productId", layoutId];
+        return ProductInfo(productId: "$zeros$productId", layoutId: product[1]);
     })
     .toList();
     return transformedFields;
   }
 
-  (int, int) _locateProduct(String productId) {
-    for (List product in productTable) {
-      if (product[0] == productId) {
-        int layoutId = product[1];
-        for (List layout in layoutTable) {
-          if (layout[0] == layoutId) {
-            return (product[1], layout[1]);
+  (int, Floor) _locateProduct(String productId) {
+    for (ProductInfo product in productList) {
+      if (product.productId == productId) {
+        int layoutId = product.layoutId;
+        for (LayoutInfo layout in layoutList) {
+          if (layout.id == layoutId) {
+            return (product.layoutId, layout.floor);
           }
         }
         break;
       }
     }
-    return (-1, -1);
+    return (-1, Floor.ground);
   }
 
   @override
@@ -206,7 +257,16 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
       viewOnSubmitted: (String productId) {
         Navigator.of(context).maybePop();
         var (_wantedLayoutId, floor) = _locateProduct(productId);
-        _floors.animateTo(floor);
+        int floorNumber;
+        switch (floor) {
+          case Floor.ground:
+            floorNumber = 0;
+          case Floor.first:
+            floorNumber = 1;
+          case Floor.second:
+            floorNumber = 2;
+        }
+        _floors.animateTo(floorNumber);
         setState(() {
           wantedLayoutId = _wantedLayoutId;
         });
@@ -214,26 +274,32 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     );
 
     if (!layoutLoaded) {
-      _loadLayout().then((List<List> layout) {
-        layoutTable = layout;
+      _loadLayout().then((List<LayoutInfo> layout) {
+        layoutList = layout;
         layoutLoaded = true;
         print("Layout loaded");
-        print(layoutTable);
+        print(layoutList);
       });
     }
 
     if (!productLoaded) {
-      _loadProducts().then((List<List> products) {
-        productTable = products;
+      _loadProducts().then((List<ProductInfo> products) {
+        productList = products;
         productLoaded = true;
         print("Products loaded");
-        print(productTable);
+        print(productList);
       });
     }
 
-    List<List> groundFloorLayoutTable = layoutTable.where((List layout) => layout[1] == 0).toList();
-    List<List> firstFloorLayoutTable = layoutTable.where((List layout) => layout[1] == 1).toList();
-    List<List> secondFloorLayoutTable = layoutTable.where((List layout) => layout[1] == 2).toList();
+    List<LayoutInfo> groundFloorLayoutTable = layoutList
+      .where((LayoutInfo layout) => layout.floor == Floor.ground)
+      .toList();
+    List<LayoutInfo> firstFloorLayoutTable = layoutList
+      .where((LayoutInfo layout) => layout.floor == Floor.first)
+      .toList();
+    List<LayoutInfo> secondFloorLayoutTable = layoutList
+      .where((LayoutInfo layout) => layout.floor == Floor.second)
+      .toList();
 
     return Scaffold(
       appBar: AppBar(
@@ -278,16 +344,16 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
         children: <Widget>[
           FloorLayout(
             key: ValueKey(wantedLayoutId + 0),
-            floor: 0,
-            layoutTable: groundFloorLayoutTable,
-            productList: productTable,
+            floor: Floor.ground,
+            layoutList: groundFloorLayoutTable,
+            productList: productList,
             wantedLayoutId: wantedLayoutId,
           ),
           FloorLayout(
             key: ValueKey(wantedLayoutId + 1),
-            floor: 1,
-            layoutTable: firstFloorLayoutTable,
-            productList: productTable,
+            floor: Floor.first,
+            layoutList: firstFloorLayoutTable,
+            productList: productList,
             wantedLayoutId: wantedLayoutId,
           ),
           FloorLayout(
@@ -304,15 +370,15 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
 }
 
 class FloorLayout extends StatefulWidget {
-  final int floor;
-  final List<List> layoutTable;
-  final List<List> productList;
+  final Floor floor;
+  final List<LayoutInfo> layoutList;
+  final List<ProductInfo> productList;
   final int wantedLayoutId;
 
   const FloorLayout({
     super.key,
     required this.floor,
-    required this.layoutTable,
+    required this.layoutList,
     required this.productList,
     required this.wantedLayoutId,
   });
@@ -331,10 +397,7 @@ class _FloorLayoutState extends State<FloorLayout> {
       if (racks[i].rack.contains(tapPosition)) {
         List<ProductInfo> productListFiltered = widget.productList
           .where(
-            (List product) => product[1] == racks[i].id,
-          )
-          .map(
-            (List product) => ProductInfo(productId: product[0], layoutId: product[1]),
+            (ProductInfo product) => product.layoutId == racks[i].id,
           )
           .toList();
 
@@ -351,42 +414,40 @@ class _FloorLayoutState extends State<FloorLayout> {
 
   @override
   Widget build(BuildContext context) {
-    racks = widget.layoutTable
-      .map((List rack) {
+    racks = widget.layoutList
+      .map((LayoutInfo layout) {
         // All following values are given in meters.
-        double x0 = rack[2].toDouble();
-        double y0 = rack[3].toDouble();
-        double a = rack[4].toDouble();
-        double b = rack[5].toDouble();
+        // double x0 = layout[2].toDouble();
+        // double y0 = layout.y0.toDouble();
+        // double a = layout.a.toDouble();
+        // double b = layout.b.toDouble();
         // Converting into device specific measurements
         double width = MediaQuery.sizeOf(context).width;
         double height = MediaQuery.sizeOf(context).height;
 
         double realWidth = 1.0;
         double realHeight = 1.0;
+
         switch (widget.floor) {
-          case 0: {
+          case Floor.ground: {
             realWidth = StoreDimensions.groundFloorWidth;
             realHeight = StoreDimensions.groundFloorHeight;
           }
-          case 1: {
+          case Floor.first: {
             realWidth = StoreDimensions.firstFloorWidth;
             realHeight = StoreDimensions.firstFloorHeight;
           }
-          case 2: {
+          case Floor.second: {
             realWidth = StoreDimensions.secondFloorWidth;
             realHeight = StoreDimensions.secondFloorHeight;
           }
-          default: {  // TODO: What to do when floor isn't 0, 1 or 2
-            realWidth = StoreDimensions.groundFloorWidth;
-            realHeight = StoreDimensions.groundFloorHeight;
-          }
         }
-        x0 = width * x0 / realWidth;
-        y0 = height * y0 / realHeight;
-        a = width * a / realWidth;
-        b = height * b / realHeight;
-        return RackInfo(id: rack[0], floor: rack[1], rack: Rect.fromLTWH(x0, y0, a, b));
+        double x0 = width * layout.x0 / realWidth;
+        double y0 = height * layout.y0 / realHeight;
+        double a = width * layout.a / realWidth;
+        double b = height * layout.b / realHeight;
+
+        return RackInfo(id: layout.id, floor: widget.floor, rack: Rect.fromLTWH(x0, y0, a, b));
       })
       .toList();
 
