@@ -58,6 +58,11 @@ class RackInfo {
   final Rect rack;
 
   const RackInfo({required this.id, required this.floor, required this.rack});
+
+  @override
+  String toString() {
+    return "{id: $id, floor: $floor, rack: $rack}";
+  }
 }
 
 @immutable
@@ -66,6 +71,11 @@ class ProductInfo {
   final int layoutId;
 
   const ProductInfo({required this.productId, required this.layoutId});
+
+  @override
+  String toString() {
+    return "{productId: $productId, layoutId: $layoutId}";
+  }
 }
 
 void main() async {
@@ -76,7 +86,7 @@ void main() async {
   Directory configDir = Directory("${appCacheDir.path}/config");
   configDir.createSync(recursive: true);
   print("Cache directory found");
-  print("config: ${configDir}");
+  print("config: $configDir");
 
   // x0 and a are orthogonal to the entrance and y0 and b are parallel
   File layoutFile = File("${configDir.path}/layout.csv");
@@ -358,9 +368,9 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
           ),
           FloorLayout(
             key: ValueKey(wantedLayoutId + 2),
-            floor: 2,
-            layoutTable: secondFloorLayoutTable,
-            productList: productTable,
+            floor: Floor.second,
+            layoutList: secondFloorLayoutTable,
+            productList: productList,
             wantedLayoutId: wantedLayoutId,
           ),
         ],
