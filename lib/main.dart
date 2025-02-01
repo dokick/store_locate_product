@@ -1,3 +1,5 @@
+// x0 and a are orthogonal to the entrance and y0 and b are parallel
+
 import 'dart:convert';
 import 'dart:io';
 
@@ -8,13 +10,30 @@ import 'package:path_provider/path_provider.dart';
 // Unit: meters
 class StoreDimensions {
   // Notice that it says firstFloor and continuing, but the first floor corresponds to floor 0
-  // english vs normal floor counting
-  static const double firstFloorWidth = 20;
-  static const double firstFloorHeight = 20;
-  static const double secondFloorWidth = 20;
-  static const double secondFloorHeight = 20;
-  static const double thirdFloorWidth = 20;
-  static const double thirdFloorHeight = 20;
+  // american vs german floor counting
+  static const double groundFloorWidth = 20;  // m
+  static const double groundFloorHeight = 20;  // m
+  static const double firstFloorWidth = 20;  // m
+  static const double firstFloorHeight = 20;  // m
+  static const double secondFloorWidth = 20;  // m
+  static const double secondFloorHeight = 20;  // m
+}
+
+@immutable
+class RackInfo {
+  final int id;
+  final int floor;
+  final Rect rack;
+
+  const RackInfo({required this.id, required this.floor, required this.rack});
+}
+
+@immutable
+class ProductInfo {
+  final String productId;
+  final int layoutId;
+
+  const ProductInfo({required this.productId, required this.layoutId});
 }
 
 void main() async {
@@ -28,17 +47,17 @@ void main() async {
   print("config: ${configDir}");
 
   File layoutFile = File("${configDir.path}/layout.csv");
-  if (!layoutFile.existsSync() || true) { // TODO: Remember to delete || true
+  if (!layoutFile.existsSync() || true) {  // TODO: Remember to delete || true
     print("Layout file created");
-    layoutFile.createSync(recursive: true, exclusive: false); // TODO: Remember to change exclusive: true
-    layoutFile.writeAsStringSync("id;floor;x0;y0;a;b\n0;0;0.5;0.7;5;5"); // TODO: Delete mock up data
+    layoutFile.createSync(recursive: true, exclusive: false);  // TODO: Remember to change exclusive: true
+    layoutFile.writeAsStringSync("id;floor;x0;y0;a;b\n0;0;0.5;0.7;5;5\n1;1;0;0;7;3\n2;2;1;1;4;2\n3;0;6;6;1;1");  // TODO: Delete mock up data
   }
 
   File productFile = File("${configDir.path}/products.csv");
-  if (!productFile.existsSync() || true) { // TODO: Remember to delete || true
+  if (!productFile.existsSync() || true) {  // TODO: Remember to delete || true
     print("Product file created");
-    productFile.createSync(recursive: true, exclusive: false); // TODO: Remember to change exclusive: true
-    productFile.writeAsStringSync("product_id;layout_id\n0000456001;0"); // TODO: Delete mock up data
+    productFile.createSync(recursive: true, exclusive: false);  // TODO: Remember to change exclusive: true
+    productFile.writeAsStringSync("product_id;layout_id\n0000456001;0\n1234567002;1\n7654321003;2");  // TODO: Delete mock up data
   }
 
   runApp(MyApp(
@@ -87,6 +106,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
   bool productLoaded = false;
   List<List> layoutTable = [];
   List<List> productTable = [];
+  int wantedLayoutId = -1;
 
   @override
   void initState() {
@@ -146,27 +166,48 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
         } else if (productId < 1_000_000_000) {
           zeros = "0" * 1;
         }
-        return ["${zeros}${productId}", layoutId];
+        return ["$zeros$productId", layoutId];
     })
     .toList();
     return transformedFields;
   }
 
+  (int, int) _locateProduct(String productId) {
+    for (List product in productTable) {
+      if (product[0] == productId) {
+        int layoutId = product[1];
+        for (List layout in layoutTable) {
+          if (layout[0] == layoutId) {
+            return (product[1], layout[1]);
+          }
+        }
+        break;
+      }
+    }
+    return (-1, -1);
+  }
+
   @override
   Widget build(BuildContext context) {
-
     Widget searchBar = SearchAnchor(
       builder: (BuildContext context, SearchController controller) {
         return IconButton(
           icon: const Icon(Icons.search),
           onPressed: () {
             controller.openView();
-            // TODO: impl
           },
         );
       },
       suggestionsBuilder: (BuildContext context, SearchController controller) {
         return List.empty(growable: true);
+      },
+      viewOnSubmitted: (String productId) {
+        Navigator.of(context).maybePop();
+        var (_wantedLayoutId, floor) = _locateProduct(productId);
+        _floors.animateTo(floor);
+        setState(() {
+          wantedLayoutId = _wantedLayoutId;
+        });
       },
     );
 
@@ -187,6 +228,10 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
         print(productTable);
       });
     }
+
+    List<List> groundFloorLayoutTable = layoutTable.where((List layout) => layout[1] == 0).toList();
+    List<List> firstFloorLayoutTable = layoutTable.where((List layout) => layout[1] == 1).toList();
+    List<List> secondFloorLayoutTable = layoutTable.where((List layout) => layout[1] == 2).toList();
 
     return Scaffold(
       appBar: AppBar(
@@ -230,16 +275,25 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
         controller: _floors,
         children: <Widget>[
           FloorLayout(
+            key: ValueKey(wantedLayoutId + 0),
             floor: 0,
-            layoutTable: layoutTable,
+            layoutTable: groundFloorLayoutTable,
+            productList: productTable,
+            wantedLayoutId: wantedLayoutId,
           ),
           FloorLayout(
+            key: ValueKey(wantedLayoutId + 1),
             floor: 1,
-            layoutTable: layoutTable,
+            layoutTable: firstFloorLayoutTable,
+            productList: productTable,
+            wantedLayoutId: wantedLayoutId,
           ),
           FloorLayout(
+            key: ValueKey(wantedLayoutId + 2),
             floor: 2,
-            layoutTable: layoutTable,
+            layoutTable: secondFloorLayoutTable,
+            productList: productTable,
+            wantedLayoutId: wantedLayoutId,
           ),
         ],
       ) : Text("Loading ..."),
@@ -250,28 +304,44 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
 class FloorLayout extends StatefulWidget {
   final int floor;
   final List<List> layoutTable;
+  final List<List> productList;
+  final int wantedLayoutId;
 
-  const FloorLayout({super.key, required this.floor, required this.layoutTable});
+  const FloorLayout({
+    super.key,
+    required this.floor,
+    required this.layoutTable,
+    required this.productList,
+    required this.wantedLayoutId,
+  });
 
   @override
   State<FloorLayout> createState() => _FloorLayoutState();
 }
 
 class _FloorLayoutState extends State<FloorLayout> {
-  List<Rect> racks = [];
+  List<RackInfo> racks = [];
 
   void onTapDown(TapDownDetails details) {
     Offset tapPosition = details.localPosition;
 
     for (int i = 0; i < racks.length; i++) {
-      if (racks[i].contains(tapPosition)) {
+      if (racks[i].rack.contains(tapPosition)) {
+        List<ProductInfo> productListFiltered = widget.productList
+          .where(
+            (List product) => product[1] == racks[i].id,
+          )
+          .map(
+            (List product) => ProductInfo(productId: product[0], layoutId: product[1]),
+          )
+          .toList();
+
         Navigator.push(
           context,
           MaterialPageRoute(
-            builder: (context) => RackProductList(),
+            builder: (context) => RackProductList(productList: productListFiltered),
           ),
         );
-        print("Rectangle $i clicked!");
         return;
       }
     }
@@ -286,26 +356,42 @@ class _FloorLayoutState extends State<FloorLayout> {
         double y0 = rack[3].toDouble();
         double a = rack[4].toDouble();
         double b = rack[5].toDouble();
-        // Now follows the conversion
+        // Converting into device specific measurements
         double width = MediaQuery.sizeOf(context).width;
         double height = MediaQuery.sizeOf(context).height;
-        x0 = width * x0 / StoreDimensions.firstFloorWidth;
-        y0 = height * y0 / StoreDimensions.firstFloorHeight;
-        a = width * a / StoreDimensions.firstFloorWidth;
-        b = height * b / StoreDimensions.firstFloorHeight;
-        return Rect.fromLTWH(x0, y0, a, b);
+
+        double realWidth = 1.0;
+        double realHeight = 1.0;
+        switch (widget.floor) {
+          case 0: {
+            realWidth = StoreDimensions.groundFloorWidth;
+            realHeight = StoreDimensions.groundFloorHeight;
+          }
+          case 1: {
+            realWidth = StoreDimensions.firstFloorWidth;
+            realHeight = StoreDimensions.firstFloorHeight;
+          }
+          case 2: {
+            realWidth = StoreDimensions.secondFloorWidth;
+            realHeight = StoreDimensions.secondFloorHeight;
+          }
+          default: {  // TODO: What to do when floor isn't 0, 1 or 2
+            realWidth = StoreDimensions.groundFloorWidth;
+            realHeight = StoreDimensions.groundFloorHeight;
+          }
+        }
+        x0 = width * x0 / realWidth;
+        y0 = height * y0 / realHeight;
+        a = width * a / realWidth;
+        b = height * b / realHeight;
+        return RackInfo(id: rack[0], floor: rack[1], rack: Rect.fromLTWH(x0, y0, a, b));
       })
       .toList();
-    // TODO: Convert real life coordinates into pixels
-
-    // TODO: Rendering rectangles
-    // TODO: Make rectangles clickable
-    // TODO: Click should render list of products on rack
 
     return GestureDetector(
       onTapDown: onTapDown,
       child: CustomPaint(
-        painter: RackPainter(racks),
+        painter: RackPainter(racks: racks, wantedLayoutId: widget.wantedLayoutId),
         child: SizedBox.expand(), // Expands to fill the available space
       ),
     );
@@ -313,16 +399,27 @@ class _FloorLayoutState extends State<FloorLayout> {
 }
 
 class RackPainter extends CustomPainter {
-  final List<Rect> racks;
+  final List<RackInfo> racks;
+  final int wantedLayoutId;
 
-  RackPainter(this.racks);
+  RackPainter({required this.racks, required this.wantedLayoutId});
 
   @override
   void paint(Canvas canvas, Size size) {
-    Paint paint = Paint()..color = Colors.grey.withValues(alpha: 0.5);
+    Paint borderPaint = Paint()
+      ..color = Colors.white
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 5; // TODO: Adjust strokeWidth if necessary
 
-    for (var rect in racks) {
-      canvas.drawRect(rect, paint);
+    for (var RackInfo(:id, :rack) in racks) {
+      Color color = (id == wantedLayoutId) ? Colors.red : Colors.grey;
+      Paint fillPaint = Paint()
+        ..color = color.withValues(alpha: 0.5);
+
+      canvas.drawRect(rack, fillPaint);
+      if (id == wantedLayoutId) {
+        canvas.drawRect(rack, borderPaint);
+      }
     }
   }
 
@@ -331,7 +428,9 @@ class RackPainter extends CustomPainter {
 }
 
 class RackProductList extends StatefulWidget {
-  const RackProductList({super.key});
+  final List<ProductInfo> productList;
+
+  const RackProductList({super.key, required this.productList});
 
   @override
   State<RackProductList> createState() => _RackProductListState();
@@ -341,12 +440,31 @@ class _RackProductListState extends State<RackProductList> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text('Rectangle Details')),
-      body: Center( // TODO: ListView Builder or similar for product list
-        child: Text(
-          'Details of Rectangle',
-          style: TextStyle(fontSize: 24),
-        ),
+      appBar: AppBar(
+        title: Text("Product List"),
+        actions: [
+          IconButton(
+            onPressed: () {
+              // TODO: impl
+            },
+            icon: Icon(Icons.add),
+          )
+        ],
+      ),
+      body: ListView.builder(
+        itemCount: widget.productList.length,
+        itemBuilder: (BuildContext context, int index) {
+          String productId = widget.productList[index].productId;
+          return ListTile(
+            title: Text("${productId.substring(0, 7)} ${productId.substring(7, 10)}"),
+            trailing: IconButton(
+              onPressed: () {
+                // TODO: impl
+              },
+              icon: Icon(Icons.delete),
+            ),
+          );
+        }
       ),
     );
   }
