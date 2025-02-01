@@ -46,7 +46,6 @@ class LayoutInfo {
 
   @override
   String toString() {
-    // TODO: implement toString
     return "{id: $id, floor: $floor, x0: $x0, y0: $y0, a: $a, b: $b}";
   }
 }
@@ -192,7 +191,6 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     print(fields[0].x0.runtimeType);
     print(fields[0].y0);
     print(fields[0].y0.runtimeType);
-    // TODO: maybe do some filtering here, because of floors
     return fields;
   }
 
