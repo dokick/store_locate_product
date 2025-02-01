@@ -1,4 +1,5 @@
-// x0 and a are orthogonal to the entrance and y0 and b are parallel
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2025 Dogukan Mertoglu, Fabian Wiegandt
 
 import 'dart:convert';
 import 'dart:io';
@@ -46,6 +47,7 @@ void main() async {
   print("Cache directory found");
   print("config: ${configDir}");
 
+  // x0 and a are orthogonal to the entrance and y0 and b are parallel
   File layoutFile = File("${configDir.path}/layout.csv");
   if (!layoutFile.existsSync() || true) {  // TODO: Remember to delete || true
     print("Layout file created");
