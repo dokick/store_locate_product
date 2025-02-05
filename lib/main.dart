@@ -119,7 +119,7 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       title: 'HM Wilma',
       theme: ThemeData(
-        colorScheme: ColorScheme.dark(brightness: Brightness.dark),// ColorScheme.fromSeed(seedColor: Colors.deepPurple),
+        colorScheme: ColorScheme.dark(brightness: Brightness.dark),
         useMaterial3: true,
       ),
       home: MyHomePage(
@@ -197,10 +197,10 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
   Future<List<ProductInfo>> _loadProducts() async {
     final stream = File(widget.productPath).openRead();
     final fields = await stream
-        .transform(utf8.decoder)
-        .transform(CsvToListConverter(fieldDelimiter: ";", eol: "\n"))
-        .skip(1)
-        .toList();
+      .transform(utf8.decoder)
+      .transform(CsvToListConverter(fieldDelimiter: ";", eol: "\n"))
+      .skip(1)
+      .toList();
     print("Raw: $fields");
     print(fields[0][0].runtimeType);
     print(fields[0][1].runtimeType);
@@ -355,21 +355,27 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
             floor: Floor.ground,
             layoutList: groundFloorLayoutTable,
             productList: productList,
+            productPath: widget.productPath,
             wantedLayoutId: wantedLayoutId,
+            productCallback: _loadProducts,
           ),
           FloorLayout(
             key: ValueKey(wantedLayoutId + 1),
             floor: Floor.first,
             layoutList: firstFloorLayoutTable,
             productList: productList,
+            productPath: widget.productPath,
             wantedLayoutId: wantedLayoutId,
+            productCallback: _loadProducts,
           ),
           FloorLayout(
             key: ValueKey(wantedLayoutId + 2),
             floor: Floor.second,
             layoutList: secondFloorLayoutTable,
             productList: productList,
+            productPath: widget.productPath,
             wantedLayoutId: wantedLayoutId,
+            productCallback: _loadProducts,
           ),
         ],
       ) : Text("Loading ..."),
@@ -381,14 +387,18 @@ class FloorLayout extends StatefulWidget {
   final Floor floor;
   final List<LayoutInfo> layoutList;
   final List<ProductInfo> productList;
+  final String productPath;
   final int wantedLayoutId;
+  final Function productCallback;
 
   const FloorLayout({
     super.key,
     required this.floor,
     required this.layoutList,
     required this.productList,
+    required this.productPath,
     required this.wantedLayoutId,
+    required this.productCallback,
   });
 
   @override
@@ -412,7 +422,12 @@ class _FloorLayoutState extends State<FloorLayout> {
         Navigator.push(
           context,
           MaterialPageRoute(
-            builder: (context) => RackProductList(productList: productListFiltered),
+            builder: (context) => RackProductList(
+              layoutId: racks[i].id,
+              productList: productListFiltered,
+              productPath: widget.productPath,
+              productCallback: widget.productCallback,
+            ),
           ),
         );
         return;
@@ -424,11 +439,6 @@ class _FloorLayoutState extends State<FloorLayout> {
   Widget build(BuildContext context) {
     racks = widget.layoutList
       .map((LayoutInfo layout) {
-        // All following values are given in meters.
-        // double x0 = layout[2].toDouble();
-        // double y0 = layout.y0.toDouble();
-        // double a = layout.a.toDouble();
-        // double b = layout.b.toDouble();
         // Converting into device specific measurements
         double width = MediaQuery.sizeOf(context).width;
         double height = MediaQuery.sizeOf(context).height;
@@ -499,15 +509,61 @@ class RackPainter extends CustomPainter {
 }
 
 class RackProductList extends StatefulWidget {
+  final int layoutId;
   final List<ProductInfo> productList;
+  final String productPath;
+  final Function productCallback;
 
-  const RackProductList({super.key, required this.productList});
+  const RackProductList({
+    super.key,
+    required this.layoutId,
+    required this.productList,
+    required this.productPath,
+    required this.productCallback
+  });
 
   @override
   State<RackProductList> createState() => _RackProductListState();
 }
 
 class _RackProductListState extends State<RackProductList> {
+
+  Future<String> _showProductIdEntryDialog(BuildContext context) async {
+    TextEditingController textController = TextEditingController(text: "");
+
+    return showDialog<String>(
+      context: context,
+      barrierDismissible: true, // false = user must tap button, true = tap outside dialog
+      builder: (context) {
+        return AlertDialog(
+          title: Text("Enter Product ID"),
+          content: TextField(
+            controller: textController,
+            decoration: const InputDecoration(hintText: "..."),
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context, "");
+              },
+              child: const Text("Cancel"),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, textController.text),
+              child: const Text("Submit"),
+            )
+          ],
+        );
+      },
+    ).then((productId) => productId ?? "",);
+  }
+
+  void _updateProductList(String path, String productId) {
+    File productFile = File(path);
+    productFile.writeAsStringSync("\n$productId;${widget.layoutId}", mode: FileMode.append);
+    widget.productCallback();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -515,10 +571,36 @@ class _RackProductListState extends State<RackProductList> {
         title: Text("Product List"),
         actions: [
           IconButton(
-            onPressed: () {
+            icon: Icon(Icons.add),
+            onPressed: () async {
+              // Navigator.push(
+              //   context,
+              //   MaterialPageRoute(
+              //     builder: (context) => AlertDialog(
+              //       title: const Text("Enter Product ID"),
+              //       content: TextField(
+              //         controller: textController,
+              //       ),
+              //       actions: [
+              //         TextButton(
+              //           onPressed: () => Navigator.pop(context, ""),
+              //           child: const Text("Cancel"),
+              //         ),
+              //         ElevatedButton(
+              //           onPressed: () => Navigator.pop(context, textController.text),
+              //           child: const Text("Submit"),
+              //         ),
+              //       ],
+              //     ),
+              //   ),
+              // );
+
+              String receivedProductId = await _showProductIdEntryDialog(context);
+              if (receivedProductId.isNotEmpty && receivedProductId.length == 10) {
+                _updateProductList(widget.productPath, receivedProductId);
+              }
               // TODO: impl
             },
-            icon: Icon(Icons.add),
           )
         ],
       ),
@@ -529,10 +611,10 @@ class _RackProductListState extends State<RackProductList> {
           return ListTile(
             title: Text("${productId.substring(0, 7)} ${productId.substring(7, 10)}"),
             trailing: IconButton(
+              icon: Icon(Icons.delete),
               onPressed: () {
                 // TODO: impl
               },
-              icon: Icon(Icons.delete),
             ),
           );
         }
