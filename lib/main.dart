@@ -1,25 +1,27 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2025 Dogukan Mertoglu, Fabian Wiegandt
 
-import 'dart:async';
-import 'dart:convert';
-import 'dart:io';
+import "dart:async";
+import "dart:convert";
+import "dart:io";
 
-import 'package:csv/csv.dart';
-import 'package:flutter/gestures.dart';
-import 'package:flutter/material.dart';
-import 'package:path_provider/path_provider.dart';
+import "package:csv/csv.dart";
+import "package:flutter/gestures.dart";
+import "package:flutter/material.dart";
+import "package:http/http.dart" as http;
+import "package:path_provider/path_provider.dart" as path;
+import "package:provider/provider.dart" as provider;
 
-// Unit: meters
+// Unit: centimeters
 class StoreDimensions {
   // Notice that it says groundFloor and continuing, because the first floor corresponds to floor 1
   // american vs german floor counting
-  static const double groundFloorWidth = 20;  // m
-  static const double groundFloorHeight = 20;  // m
-  static const double firstFloorWidth = 20;  // m
-  static const double firstFloorHeight = 20;  // m
-  static const double secondFloorWidth = 20;  // m
-  static const double secondFloorHeight = 20;  // m
+  static const int groundFloorWidth = 20;  // cm
+  static const int groundFloorHeight = 20;  // cm
+  static const int firstFloorWidth = 2000;  // cm
+  static const int firstFloorHeight = 1800;  // cm
+  static const int secondFloorWidth = 20;  // cm
+  static const int secondFloorHeight = 20;  // cm
 }
 
 enum Floor {
@@ -32,10 +34,10 @@ enum Floor {
 class LayoutInfo {
   final int id;
   final Floor floor;
-  final double x0;
-  final double y0;
-  final double a;
-  final double b;
+  final int x0;  // cm
+  final int y0;  // cm
+  final int a;  // cm
+  final int b;  // cm
 
   const LayoutInfo({
     required this.id,
@@ -89,7 +91,7 @@ class ProductInfo {
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  final Directory appCacheDir = await getApplicationCacheDirectory();
+  final Directory appCacheDir = await path.getApplicationCacheDirectory();
   appCacheDir.createSync(recursive: true);
   Directory configDir = Directory("${appCacheDir.path}/config");
   configDir.createSync(recursive: true);
@@ -97,24 +99,44 @@ void main() async {
   print("config: $configDir");
 
   // x0 and a are orthogonal to the entrance and y0 and b are parallel
-  File layoutFile = File("${configDir.path}/layout.csv");
+  // In layout.csv y0, y0, a and b are given in centimeters
+  File layoutFile = File("${configDir.path}/locations.csv");
   if (!layoutFile.existsSync() || true) {  // TODO: Remember to delete || true
     print("Layout file created");
     layoutFile.createSync(recursive: true, exclusive: false);  // TODO: Remember to change exclusive: true
-    layoutFile.writeAsStringSync("id;floor;x0;y0;a;b\n0;0;0.5;0.7;5;5\n1;1;0;0;7;3\n2;2;1;1;4;2\n3;0;6;6;1;1");  // TODO: Delete mock up data
+    layoutFile.writeAsStringSync("id;floor;x0;y0;a;b");
   }
 
   File productFile = File("${configDir.path}/products.csv");
   if (!productFile.existsSync() || true) {  // TODO: Remember to delete || true
     print("Product file created");
     productFile.createSync(recursive: true, exclusive: false);  // TODO: Remember to change exclusive: true
-    productFile.writeAsStringSync("product_id;layout_id\n0000456001;0\n1234567002;1\n7654321003;2");  // TODO: Delete mock up data
+    productFile.writeAsStringSync("product_id;layout_id");
   }
 
-  runApp(MyApp(
-    layoutPath: layoutFile.path,
-    productPath: productFile.path,
-  ));
+  runApp(
+    provider.ChangeNotifierProvider(
+      create: (context) => FileNotifier(),
+      child: MyApp(
+        layoutPath: layoutFile.path,
+        productPath: productFile.path,
+      ),
+    )
+  );
+}
+
+int findLowestAvailableIndex(List<LayoutInfo> layoutList) {
+  List<int> onlyIndexes = layoutList
+    .map((LayoutInfo layout) => layout.id)
+    .toList();
+  onlyIndexes.sort((a, b) => a.compareTo(b));
+
+  for (int i = 0; i < onlyIndexes.length; i++) {
+    if(onlyIndexes[i] + 1 != onlyIndexes[i + 1]) {
+      return onlyIndexes[i] + 1;
+    }
+  }
+  return onlyIndexes[onlyIndexes.length - 1] + 1;
 }
 
 class MyApp extends StatelessWidget {
@@ -193,18 +215,18 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
         return LayoutInfo(
           id: layout[0],
           floor: floor,
-          x0: layout[2].toDouble(),
-          y0: layout[3].toDouble(),
-          a: layout[4].toDouble(),
-          b: layout[5].toDouble(),
+          x0: layout[2].toInt(),
+          y0: layout[3].toInt(),
+          a: layout[4].toInt(),
+          b: layout[5].toInt(),
         );
       })
       .toList();
     print("Inside of loadLayout: $fields");
-    print(fields[0].x0);
-    print(fields[0].x0.runtimeType);
-    print(fields[0].y0);
-    print(fields[0].y0.runtimeType);
+    // print(fields[0].x0);
+    // print(fields[0].x0.runtimeType);
+    // print(fields[0].y0);
+    // print(fields[0].y0.runtimeType);
     return fields;
   }
 
@@ -216,8 +238,8 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
       .skip(1)
       .toList();
     print("Raw: $fields");
-    print(fields[0][0].runtimeType);
-    print(fields[0][1].runtimeType);
+    // print(fields[0][0].runtimeType);
+    // print(fields[0][1].runtimeType);
     List<ProductInfo> transformedFields = fields
       .map((List product) {
         int productId = product[0];
@@ -260,6 +282,34 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
       }
     }
     return (-1, Floor.ground);
+  }
+
+  Future<void> _downloadAndReplace() async {
+    final locationsCsvUrl = "https://pastebin.com/raw/MMruJhV9";
+    final productsCsvUrl = "https://pastebin.com/raw/TzRVGAhP";
+
+    try {
+      final response = await http.get(Uri.parse(locationsCsvUrl));
+      if (response.statusCode == 200) {
+        final file = File(widget.layoutPath);
+        await file.writeAsString(response.body);
+        print('Downloaded and replaced');
+      }
+    } catch (e) {
+      print('Error downloading file: $e');
+    }
+
+    try {
+      final response = await http.get(Uri.parse(productsCsvUrl));
+      if (response.statusCode == 200) {
+        final file = File(widget.productPath);
+        await file.writeAsString(response.body);
+        print('Downloaded and replaced');
+      }
+    } catch (e) {
+      print('Error downloading file: $e');
+    }
+
   }
 
   @override
@@ -323,76 +373,98 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
       .where((LayoutInfo layout) => layout.floor == Floor.second)
       .toList();
 
-    return Scaffold(
-      appBar: AppBar(
-        // TRY THIS: Try changing the color here to a specific color (to
-        // Colors.amber, perhaps?) and trigger a hot reload to see the AppBar
-        // change color while the other colors stay the same.
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        // Here we take the value from the MyHomePage object that was created by
-        // the App.build method, and use it to set our appbar title.
-        leading: IconButton(
-          onPressed: () {
-            // TODO: impl
-          },
-          icon: Icon(Icons.add),
-        ),
-        actions: [
-          IconButton(
-            onPressed: () {
-              // TODO: impl
-            },
-            icon: Icon(Icons.camera_alt_outlined),
-          ),
-          searchBar
-        ],
-        bottom: TabBar(
-          controller: _floors,
-          tabs: [
-            Tab(
-              icon: Image.asset("assets/number-zero-fill-svgrepo-com.png"),
+    return provider.Consumer<FileNotifier>(
+      builder: (context, fileNotifier, child) {
+        return Scaffold(
+          appBar: AppBar(
+            // TRY THIS: Try changing the color here to a specific color (to
+            // Colors.amber, perhaps?) and trigger a hot reload to see the AppBar
+            // change color while the other colors stay the same.
+            backgroundColor: Theme.of(context).colorScheme.inversePrimary,
+            // Here we take the value from the MyHomePage object that was created by
+            // the App.build method, and use it to set our appbar title.
+            leading: IconButton(
+              icon: Icon(Icons.add),
+              onPressed: () {
+                // TODO: impl
+              },
             ),
-            Tab(
-              icon: Image.asset("assets/number-one-fill-svgrepo-com.png"),
+            actions: [
+              IconButton(
+                icon: Icon(Icons.sync),
+                onPressed: () {
+                  _downloadAndReplace().then((_) {
+                    _loadLayout().then((List<LayoutInfo> locations) {
+                      setState(() {
+                        layoutList = locations;
+                      });
+                    });
+                    _loadProducts().then((List<ProductInfo> products) {
+                      setState(() {
+                        productList = products;
+                      });
+                    });
+                  });
+                  // TODO: impl
+                },
+              ),
+              IconButton(
+                icon: Icon(Icons.camera_alt_outlined),
+                onPressed: () {
+                  // TODO: impl
+                },
+              ),
+              searchBar
+            ],
+            bottom: TabBar(
+              controller: _floors,
+              tabs: [
+                Tab(
+                  icon: Image.asset("assets/number-zero-fill-svgrepo-com.png"),
+                ),
+                Tab(
+                  icon: Image.asset("assets/number-one-fill-svgrepo-com.png"),
+                ),
+                Tab(
+                  icon: Image.asset("assets/number-two-fill-svgrepo-com.png"),
+                ),
+              ],
             ),
-            Tab(
-              icon: Image.asset("assets/number-two-fill-svgrepo-com.png"),
-            ),
-          ],
-        ),
-      ),
-      body: layoutLoaded ? TabBarView(
-        controller: _floors,
-        children: <Widget>[
-          FloorLayout(
-            key: ValueKey(wantedLayoutId + 0),
-            floor: Floor.ground,
-            layoutList: groundFloorLayoutTable,
-            productList: productList,
-            productPath: widget.productPath,
-            wantedLayoutId: wantedLayoutId,
-            productCallback: _loadProducts,
           ),
-          FloorLayout(
-            key: ValueKey(wantedLayoutId + 1),
-            floor: Floor.first,
-            layoutList: firstFloorLayoutTable,
-            productList: productList,
-            productPath: widget.productPath,
-            wantedLayoutId: wantedLayoutId,
-            productCallback: _loadProducts,
-          ),
-          FloorLayout(
-            key: ValueKey(wantedLayoutId + 2),
-            floor: Floor.second,
-            layoutList: secondFloorLayoutTable,
-            productList: productList,
-            productPath: widget.productPath,
-            wantedLayoutId: wantedLayoutId,
-            productCallback: _loadProducts,
-          ),
-        ],
-      ) : Text("Loading ..."),
+          body: layoutLoaded ? TabBarView(
+            controller: _floors,
+            children: <Widget>[
+              FloorLayout(
+                key: ValueKey(wantedLayoutId + 0),
+                floor: Floor.ground,
+                layoutList: groundFloorLayoutTable,
+                productList: productList,
+                productPath: widget.productPath,
+                wantedLayoutId: wantedLayoutId,
+                productCallback: _loadProducts,
+              ),
+              FloorLayout(
+                key: ValueKey(wantedLayoutId + 1),
+                floor: Floor.first,
+                layoutList: firstFloorLayoutTable,
+                productList: productList,
+                productPath: widget.productPath,
+                wantedLayoutId: wantedLayoutId,
+                productCallback: _loadProducts,
+              ),
+              FloorLayout(
+                key: ValueKey(wantedLayoutId + 2),
+                floor: Floor.second,
+                layoutList: secondFloorLayoutTable,
+                productList: productList,
+                productPath: widget.productPath,
+                wantedLayoutId: wantedLayoutId,
+                productCallback: _loadProducts,
+              ),
+            ],
+          ) : Text("Loading ..."),
+        );
+      },
     );
   }
 }
@@ -542,8 +614,8 @@ class _FloorLayoutState extends State<FloorLayout> {
         double width = MediaQuery.sizeOf(context).width;
         double height = MediaQuery.sizeOf(context).height;
 
-        double realWidth = 1.0;
-        double realHeight = 1.0;
+        int realWidth = 1;
+        int realHeight = 1;
 
         switch (widget.floor) {
           case Floor.ground: {
@@ -559,6 +631,7 @@ class _FloorLayoutState extends State<FloorLayout> {
             realHeight = StoreDimensions.secondFloorHeight;
           }
         }
+        // double[px] = double[px] * int[cm] / int[cm]
         double x0 = width * layout.x0 / realWidth;
         double y0 = height * layout.y0 / realHeight;
         double a = width * layout.a / realWidth;
@@ -592,7 +665,7 @@ class RackPainter extends CustomPainter {
     Paint borderPaint = Paint()
       ..color = Colors.white
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 5; // TODO: Adjust strokeWidth if necessary
+      ..strokeWidth = 2; // TODO: Adjust strokeWidth if necessary
 
     for (var RackInfo(:id, :rack) in racks) {
       Color color = (id == wantedLayoutId) ? Colors.red : Colors.grey;
@@ -600,7 +673,7 @@ class RackPainter extends CustomPainter {
         ..color = color.withValues(alpha: 0.5);
 
       canvas.drawRect(rack, fillPaint);
-      if (id == wantedLayoutId) {
+      if ((id == wantedLayoutId) || true) {
         canvas.drawRect(rack, borderPaint);
       }
     }
@@ -608,6 +681,17 @@ class RackPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(CustomPainter oldDelegate) => false;
+}
+
+class FileNotifier extends ChangeNotifier {
+  String _content = '';
+
+  String get content => _content;
+
+  void updateContent(String newContent) {
+    _content = newContent;
+    notifyListeners();
+  }
 }
 
 class RackProductList extends StatefulWidget {
@@ -663,14 +747,14 @@ class _RackProductListState extends State<RackProductList> {
   void _updateProductList(String path, String productId) {
     File productFile = File(path);
     productFile.writeAsStringSync("\n$productId;${widget.layoutId}", mode: FileMode.append);
-    widget.productCallback();
+    // widget.productCallback();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text("Product List"),
+        title: Text("Product List (ID: ${widget.layoutId})"),
         actions: [
           IconButton(
             icon: Icon(Icons.add),
@@ -700,6 +784,9 @@ class _RackProductListState extends State<RackProductList> {
               String receivedProductId = await _showProductIdEntryDialog(context);
               if (receivedProductId.isNotEmpty && receivedProductId.length == 10) {
                 _updateProductList(widget.productPath, receivedProductId);
+                var newContent = File(widget.productPath).readAsStringSync(encoding: utf8);
+                provider.Provider.of<FileNotifier>(context, listen: false)
+                  .updateContent(newContent);
               }
               // TODO: impl
             },
