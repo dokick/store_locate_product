@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2025 Dogukan Mertoglu, Fabian Wiegandt
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:csv/csv.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 
@@ -23,7 +25,7 @@ class StoreDimensions {
 enum Floor {
   ground,
   first,
-  second
+  second,
 }
 
 @immutable
@@ -56,7 +58,11 @@ class RackInfo {
   final Floor floor;
   final Rect rack;
 
-  const RackInfo({required this.id, required this.floor, required this.rack});
+  const RackInfo({
+    required this.id,
+    required this.floor,
+    required this.rack,
+  });
 
   @override
   String toString() {
@@ -69,7 +75,10 @@ class ProductInfo {
   final String productId;
   final int layoutId;
 
-  const ProductInfo({required this.productId, required this.layoutId});
+  const ProductInfo({
+    required this.productId,
+    required this.layoutId,
+  });
 
   @override
   String toString() {
@@ -136,7 +145,12 @@ class MyHomePage extends StatefulWidget {
   final String layoutPath;
   final String productPath;
 
-  const MyHomePage({super.key, required this.title, required this.layoutPath, required this.productPath});
+  const MyHomePage({
+    super.key,
+    required this.title,
+    required this.layoutPath,
+    required this.productPath,
+  });
 
   @override
   State<MyHomePage> createState() => _MyHomePageState();
@@ -228,8 +242,8 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
           zeros = "0" * 1;
         }
         return ProductInfo(productId: "$zeros$productId", layoutId: product[1]);
-    })
-    .toList();
+      })
+      .toList();
     return transformedFields;
   }
 
@@ -408,32 +422,117 @@ class FloorLayout extends StatefulWidget {
 class _FloorLayoutState extends State<FloorLayout> {
   List<RackInfo> racks = [];
 
+  Timer? _longPressTimer;
+  bool _isLongPress = false;
+
   void onTapDown(TapDownDetails details) {
     Offset tapPosition = details.localPosition;
+    _isLongPress = false;
 
-    for (int i = 0; i < racks.length; i++) {
-      if (racks[i].rack.contains(tapPosition)) {
-        List<ProductInfo> productListFiltered = widget.productList
-          .where(
-            (ProductInfo product) => product.layoutId == racks[i].id,
-          )
-          .toList();
+    _longPressTimer = Timer(Duration(milliseconds: 500), () {
+      _isLongPress = true;
+      for (int i = 0; i < racks.length; i++) {
+        if (racks[i].rack.contains(tapPosition)) {
+          showDialog<void>(
+            context: context,
+            barrierDismissible: true,
+            builder: (BuildContext dialogContext) {
+              return AlertDialog(
+                title: const Text("Deleting location"),
+                content: const Text("Do you want to delete this location?"),
+                actions: <Widget>[
+                  TextButton(
+                    child: const Text("Cancel"),
+                    onPressed: () {
+                      Navigator.of(dialogContext).pop();
+                    },
+                  ),
+                  TextButton(
+                    child: const Text("Delete"),
+                    onPressed: () {
+                      // TODO: impl
+                      Navigator.of(dialogContext).pop();
+                    },
+                  ),
+                ],
+              );
+            },
+          );
+        }
+      }
+    });
+  }
 
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (context) => RackProductList(
-              layoutId: racks[i].id,
-              productList: productListFiltered,
-              productPath: widget.productPath,
-              productCallback: widget.productCallback,
+  void onTapUp(TapUpDetails details) {
+    if (!_isLongPress) {
+      _longPressTimer?.cancel(); // Cleanup timer
+      Offset tapPosition = details.localPosition;
+
+      for (int i = 0; i < racks.length; i++) {
+        if (racks[i].rack.contains(tapPosition)) {
+          List<ProductInfo> productListFiltered = widget.productList
+            .where(
+              (ProductInfo product) => racks[i].id == product.layoutId,
+            )
+            .toList();
+
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => RackProductList(
+                layoutId: racks[i].id,
+                productList: productListFiltered,
+                productPath: widget.productPath,
+                productCallback: widget.productCallback,
+              ),
             ),
-          ),
-        );
-        return;
+          );
+          return;
+        }
       }
     }
   }
+
+  void onTapCancel() {
+    _longPressTimer?.cancel();
+  }
+
+  // void onLongPressDown(LongPressDownDetails details) {
+  //   Offset longTapPosition = details.localPosition;
+  //
+  //   _longPressTimer = Timer(Duration(milliseconds: 1000), () {
+  //     for (int i = 0; i < racks.length; i++) {
+  //       if(racks[i].rack.contains(longTapPosition)) {
+  //         showDialog<void>(
+  //           context: context,
+  //           barrierDismissible: true,
+  //           builder: (BuildContext dialogContext) {
+  //             return AlertDialog(
+  //               title: const Text("Deleting location"),
+  //               content: const Text("Do you want to delete this location?"),
+  //               actions: <Widget>[
+  //                 TextButton(
+  //                   child: const Text("Cancel"),
+  //                   onPressed: () {
+  //                     Navigator.of(dialogContext).pop();
+  //                   },
+  //                 ),
+  //                 TextButton(
+  //                   child: const Text("Delete"),
+  //                   onPressed: () {
+  //                     // TODO: impl
+  //                     Navigator.of(dialogContext).pop();
+  //                   },
+  //                 ),
+  //               ],
+  //             );
+  //           },
+  //         );
+  //       }
+  //     }
+  //   });
+  //   return;
+  // }
 
   @override
   Widget build(BuildContext context) {
@@ -471,6 +570,9 @@ class _FloorLayoutState extends State<FloorLayout> {
 
     return GestureDetector(
       onTapDown: onTapDown,
+      onTapUp: onTapUp,
+      onTapCancel: onTapCancel,
+      // onLongPressDown: onLongPressDown,
       child: CustomPaint(
         painter: RackPainter(racks: racks, wantedLayoutId: widget.wantedLayoutId),
         child: SizedBox.expand(), // Expands to fill the available space
