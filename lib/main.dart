@@ -16,12 +16,12 @@ import "package:provider/provider.dart" as provider;
 class StoreDimensions {
   // Notice that it says groundFloor and continuing, because the first floor corresponds to floor 1
   // american vs german floor counting
-  static const int groundFloorWidth = 20;  // cm
-  static const int groundFloorHeight = 20;  // cm
-  static const int firstFloorWidth = 2000;  // cm
-  static const int firstFloorHeight = 1800;  // cm
-  static const int secondFloorWidth = 20;  // cm
-  static const int secondFloorHeight = 20;  // cm
+  static const int groundFloorWidth = 1000;  // cm
+  static const int groundFloorHeight = 1000;  // cm
+  static const int firstFloorWidth = 3100;  // cm (pointing east)
+  static const int firstFloorHeight = 4500;  // cm (pointing south)
+  static const int secondFloorWidth = 1000;  // cm
+  static const int secondFloorHeight = 1000;  // cm
 }
 
 enum Floor {
