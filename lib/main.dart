@@ -5,7 +5,7 @@ import "dart:async";
 import "dart:convert";
 import "dart:io";
 
-import "package:csv/csv.dart";
+import "package:csv/csv.dart" as csv;
 import "package:flutter/gestures.dart";
 import "package:flutter/material.dart";
 import "package:http/http.dart" as http;
@@ -16,8 +16,8 @@ import "package:provider/provider.dart" as provider;
 class StoreDimensions {
   // Notice that it says groundFloor and continuing, because the first floor corresponds to floor 1
   // american vs german floor counting
-  static const int groundFloorWidth = 1000;  // cm
-  static const int groundFloorHeight = 1000;  // cm
+  static const int groundFloorWidth = 1700;  // cm (pointing south)
+  static const int groundFloorHeight = 3400;  // cm (pointing west)
   static const int firstFloorWidth = 3100;  // cm (pointing east)
   static const int firstFloorHeight = 4500;  // cm (pointing south)
   static const int secondFloorWidth = 1000;  // cm
@@ -198,7 +198,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     final stream = File(widget.layoutPath).openRead();
     final fields = await stream
       .transform(utf8.decoder)
-      .transform(CsvToListConverter(fieldDelimiter: ";", eol: "\n"))
+      .transform(csv.CsvToListConverter(fieldDelimiter: ";", eol: "\n"))
       .skip(1)
       .map((List layout) {
         Floor floor = Floor.ground;
@@ -234,7 +234,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     final stream = File(widget.productPath).openRead();
     final fields = await stream
       .transform(utf8.decoder)
-      .transform(CsvToListConverter(fieldDelimiter: ";", eol: "\n"))
+      .transform(csv.CsvToListConverter(fieldDelimiter: ";", eol: "\n"))
       .skip(1)
       .toList();
     print("Raw: $fields");
@@ -665,7 +665,7 @@ class RackPainter extends CustomPainter {
     Paint borderPaint = Paint()
       ..color = Colors.white
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 2; // TODO: Adjust strokeWidth if necessary
+      ..strokeWidth = 1; // TODO: Adjust strokeWidth if necessary
 
     for (var RackInfo(:id, :rack) in racks) {
       Color color = (id == wantedLayoutId) ? Colors.red : Colors.grey;
