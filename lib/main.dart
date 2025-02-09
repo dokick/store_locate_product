@@ -6,6 +6,7 @@ import "dart:convert";
 import "dart:io";
 
 import "package:csv/csv.dart" as csv;
+import "package:flutter/foundation.dart";  // kDebugMode
 import "package:flutter/gestures.dart";
 import "package:flutter/material.dart";
 import "package:http/http.dart" as http;
@@ -17,7 +18,7 @@ class StoreDimensions {
   // Notice that it says groundFloor and continuing, because the first floor corresponds to floor 1
   // american vs german floor counting
   static const int groundFloorWidth = 1700;  // cm (pointing south)
-  static const int groundFloorHeight = 3400;  // cm (pointing west)
+  static const int groundFloorHeight = 4000;  // cm (pointing west)
   static const int firstFloorWidth = 3100;  // cm (pointing east)
   static const int firstFloorHeight = 4500;  // cm (pointing south)
   static const int secondFloorWidth = 1000;  // cm
@@ -75,16 +76,16 @@ class RackInfo {
 @immutable
 class ProductInfo {
   final String productId;
-  final int layoutId;
+  final int locationId;
 
   const ProductInfo({
     required this.productId,
-    required this.layoutId,
+    required this.locationId,
   });
 
   @override
   String toString() {
-    return "{productId: $productId, layoutId: $layoutId}";
+    return "{productId: $productId, layoutId: $locationId}";
   }
 }
 
@@ -117,7 +118,7 @@ void main() async {
   runApp(
     provider.ChangeNotifierProvider(
       create: (context) => FileNotifier(),
-      child: MyApp(
+      child: HmWilmaLocateProduct(
         layoutPath: layoutFile.path,
         productPath: productFile.path,
       ),
@@ -139,11 +140,11 @@ int findLowestAvailableIndex(List<LayoutInfo> layoutList) {
   return onlyIndexes[onlyIndexes.length - 1] + 1;
 }
 
-class MyApp extends StatelessWidget {
+class HmWilmaLocateProduct extends StatelessWidget {
   final String layoutPath;
   final String productPath;
 
-  const MyApp({super.key, required this.layoutPath, required this.productPath});
+  const HmWilmaLocateProduct({super.key, required this.layoutPath, required this.productPath});
 
   @override
   Widget build(BuildContext context) {
@@ -153,7 +154,7 @@ class MyApp extends StatelessWidget {
         colorScheme: ColorScheme.dark(brightness: Brightness.dark),
         useMaterial3: true,
       ),
-      home: MyHomePage(
+      home: HomePage(
         title: 'HM Wilma Locate Product',
         layoutPath: layoutPath,
         productPath: productPath,
@@ -162,12 +163,12 @@ class MyApp extends StatelessWidget {
   }
 }
 
-class MyHomePage extends StatefulWidget {
+class HomePage extends StatefulWidget {
   final String title;
   final String layoutPath;
   final String productPath;
 
-  const MyHomePage({
+  const HomePage({
     super.key,
     required this.title,
     required this.layoutPath,
@@ -175,16 +176,16 @@ class MyHomePage extends StatefulWidget {
   });
 
   @override
-  State<MyHomePage> createState() => _MyHomePageState();
+  State<HomePage> createState() => _HomePageState();
 }
 
-class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
+class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   late TabController _floors;
-  bool layoutLoaded = false;
-  bool productLoaded = false;
-  List<LayoutInfo> layoutList = [];
+  bool locationsLoaded = false;
+  bool productsLoaded = false;
+  List<LayoutInfo> locationList = [];
   List<ProductInfo> productList = [];
-  int wantedLayoutId = -1;
+  int wantedLocationId = -1;
 
   @override
   void initState() {
@@ -222,7 +223,9 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
         );
       })
       .toList();
-    print("Inside of loadLayout: $fields");
+    if (kDebugMode) {
+      print("Inside of loadLayout: $fields");
+    }
     // print(fields[0].x0);
     // print(fields[0].x0.runtimeType);
     // print(fields[0].y0);
@@ -237,7 +240,9 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
       .transform(csv.CsvToListConverter(fieldDelimiter: ";", eol: "\n"))
       .skip(1)
       .toList();
-    print("Raw: $fields");
+    if (kDebugMode) {
+      print("Raw: $fields");
+    }
     // print(fields[0][0].runtimeType);
     // print(fields[0][1].runtimeType);
     List<ProductInfo> transformedFields = fields
@@ -263,7 +268,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
         } else if (productId < 1_000_000_000) {
           zeros = "0" * 1;
         }
-        return ProductInfo(productId: "$zeros$productId", layoutId: product[1]);
+        return ProductInfo(productId: "$zeros$productId", locationId: product[1]);
       })
       .toList();
     return transformedFields;
@@ -272,10 +277,10 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
   (int, Floor) _locateProduct(String productId) {
     for (ProductInfo product in productList) {
       if (product.productId == productId) {
-        int layoutId = product.layoutId;
-        for (LayoutInfo layout in layoutList) {
+        int layoutId = product.locationId;
+        for (LayoutInfo layout in locationList) {
           if (layout.id == layoutId) {
-            return (product.layoutId, layout.floor);
+            return (product.locationId, layout.floor);
           }
         }
         break;
@@ -293,7 +298,9 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
       if (response.statusCode == 200) {
         final file = File(widget.layoutPath);
         await file.writeAsString(response.body);
-        print('Downloaded and replaced');
+        if (kDebugMode) {
+          print('Downloaded and replaced');
+        }
       }
     } catch (e) {
       print('Error downloading file: $e');
@@ -304,7 +311,9 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
       if (response.statusCode == 200) {
         final file = File(widget.productPath);
         await file.writeAsString(response.body);
-        print('Downloaded and replaced');
+        if (kDebugMode) {
+          print('Downloaded and replaced');
+        }
       }
     } catch (e) {
       print('Error downloading file: $e');
@@ -328,7 +337,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
       },
       viewOnSubmitted: (String productId) {
         Navigator.of(context).maybePop();
-        var (_wantedLayoutId, floor) = _locateProduct(productId);
+        var (_wantedLocationId, floor) = _locateProduct(productId);
         int floorNumber;
         switch (floor) {
           case Floor.ground:
@@ -340,37 +349,41 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
         }
         _floors.animateTo(floorNumber);
         setState(() {
-          wantedLayoutId = _wantedLayoutId;
+          wantedLocationId = _wantedLocationId;
         });
       },
     );
 
-    if (!layoutLoaded) {
-      _loadLayout().then((List<LayoutInfo> layout) {
-        layoutList = layout;
-        layoutLoaded = true;
-        print("Layout loaded");
-        print(layoutList);
+    if (!locationsLoaded) {
+      _loadLayout().then((List<LayoutInfo> location) {
+        setState(() {
+          locationList = location;
+          locationsLoaded = true;
+        });
+        if (kDebugMode) {
+          print("Layout loaded");
+          print(locationList);
+        }
       });
     }
 
-    if (!productLoaded) {
+    if (!productsLoaded) {
       _loadProducts().then((List<ProductInfo> products) {
         productList = products;
-        productLoaded = true;
+        productsLoaded = true;
         print("Products loaded");
         print(productList);
       });
     }
 
-    List<LayoutInfo> groundFloorLayoutTable = layoutList
-      .where((LayoutInfo layout) => layout.floor == Floor.ground)
+    List<LayoutInfo> groundFloorLayoutTable = locationList
+      .where((LayoutInfo location) => location.floor == Floor.ground)
       .toList();
-    List<LayoutInfo> firstFloorLayoutTable = layoutList
-      .where((LayoutInfo layout) => layout.floor == Floor.first)
+    List<LayoutInfo> firstFloorLayoutTable = locationList
+      .where((LayoutInfo location) => location.floor == Floor.first)
       .toList();
-    List<LayoutInfo> secondFloorLayoutTable = layoutList
-      .where((LayoutInfo layout) => layout.floor == Floor.second)
+    List<LayoutInfo> secondFloorLayoutTable = locationList
+      .where((LayoutInfo location) => location.floor == Floor.second)
       .toList();
 
     return provider.Consumer<FileNotifier>(
@@ -392,17 +405,16 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
             actions: [
               IconButton(
                 icon: Icon(Icons.sync),
-                onPressed: () {
-                  _downloadAndReplace().then((_) {
-                    _loadLayout().then((List<LayoutInfo> locations) {
-                      setState(() {
-                        layoutList = locations;
-                      });
+                onPressed: () async {
+                  await _downloadAndReplace();
+                  _loadLayout().then((List<LayoutInfo> locations) {
+                    setState(() {
+                      locationList = locations;
                     });
-                    _loadProducts().then((List<ProductInfo> products) {
-                      setState(() {
-                        productList = products;
-                      });
+                  });
+                  _loadProducts().then((List<ProductInfo> products) {
+                    setState(() {
+                      productList = products;
                     });
                   });
                   // TODO: impl
@@ -431,34 +443,34 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
               ],
             ),
           ),
-          body: layoutLoaded ? TabBarView(
+          body: locationsLoaded ? TabBarView(
             controller: _floors,
             children: <Widget>[
               FloorLayout(
-                key: ValueKey(wantedLayoutId + 0),
+                key: ValueKey(wantedLocationId + 0),
                 floor: Floor.ground,
-                layoutList: groundFloorLayoutTable,
+                locationList: groundFloorLayoutTable,
                 productList: productList,
                 productPath: widget.productPath,
-                wantedLayoutId: wantedLayoutId,
+                wantedLocationId: wantedLocationId,
                 productCallback: _loadProducts,
               ),
               FloorLayout(
-                key: ValueKey(wantedLayoutId + 1),
+                key: ValueKey(wantedLocationId + 1),
                 floor: Floor.first,
-                layoutList: firstFloorLayoutTable,
+                locationList: firstFloorLayoutTable,
                 productList: productList,
                 productPath: widget.productPath,
-                wantedLayoutId: wantedLayoutId,
+                wantedLocationId: wantedLocationId,
                 productCallback: _loadProducts,
               ),
               FloorLayout(
-                key: ValueKey(wantedLayoutId + 2),
+                key: ValueKey(wantedLocationId + 2),
                 floor: Floor.second,
-                layoutList: secondFloorLayoutTable,
+                locationList: secondFloorLayoutTable,
                 productList: productList,
                 productPath: widget.productPath,
-                wantedLayoutId: wantedLayoutId,
+                wantedLocationId: wantedLocationId,
                 productCallback: _loadProducts,
               ),
             ],
@@ -471,19 +483,19 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
 
 class FloorLayout extends StatefulWidget {
   final Floor floor;
-  final List<LayoutInfo> layoutList;
+  final List<LayoutInfo> locationList;
   final List<ProductInfo> productList;
   final String productPath;
-  final int wantedLayoutId;
+  final int wantedLocationId;
   final Function productCallback;
 
   const FloorLayout({
     super.key,
     required this.floor,
-    required this.layoutList,
+    required this.locationList,
     required this.productList,
     required this.productPath,
-    required this.wantedLayoutId,
+    required this.wantedLocationId,
     required this.productCallback,
   });
 
@@ -544,7 +556,7 @@ class _FloorLayoutState extends State<FloorLayout> {
         if (racks[i].rack.contains(tapPosition)) {
           List<ProductInfo> productListFiltered = widget.productList
             .where(
-              (ProductInfo product) => racks[i].id == product.layoutId,
+              (ProductInfo product) => racks[i].id == product.locationId,
             )
             .toList();
 
@@ -552,7 +564,7 @@ class _FloorLayoutState extends State<FloorLayout> {
             context,
             MaterialPageRoute(
               builder: (context) => RackProductList(
-                layoutId: racks[i].id,
+                locationId: racks[i].id,
                 productList: productListFiltered,
                 productPath: widget.productPath,
                 productCallback: widget.productCallback,
@@ -608,11 +620,11 @@ class _FloorLayoutState extends State<FloorLayout> {
 
   @override
   Widget build(BuildContext context) {
-    racks = widget.layoutList
+    racks = widget.locationList
       .map((LayoutInfo layout) {
         // Converting into device specific measurements
-        double width = MediaQuery.sizeOf(context).width;
-        double height = MediaQuery.sizeOf(context).height;
+        double deviceWidth = MediaQuery.sizeOf(context).width;
+        double deviceHeight = MediaQuery.sizeOf(context).height;
 
         int realWidth = 1;
         int realHeight = 1;
@@ -632,10 +644,10 @@ class _FloorLayoutState extends State<FloorLayout> {
           }
         }
         // double[px] = double[px] * int[cm] / int[cm]
-        double x0 = width * layout.x0 / realWidth;
-        double y0 = height * layout.y0 / realHeight;
-        double a = width * layout.a / realWidth;
-        double b = height * layout.b / realHeight;
+        double x0 = deviceWidth * layout.x0 / realWidth;
+        double y0 = deviceHeight * layout.y0 / realHeight;
+        double a = deviceWidth * layout.a / realWidth;
+        double b = deviceHeight * layout.b / realHeight;
 
         return RackInfo(id: layout.id, floor: widget.floor, rack: Rect.fromLTWH(x0, y0, a, b));
       })
@@ -647,7 +659,7 @@ class _FloorLayoutState extends State<FloorLayout> {
       onTapCancel: onTapCancel,
       // onLongPressDown: onLongPressDown,
       child: CustomPaint(
-        painter: RackPainter(racks: racks, wantedLayoutId: widget.wantedLayoutId),
+        painter: RackPainter(racks: racks, wantedLocationId: widget.wantedLocationId),
         child: SizedBox.expand(), // Expands to fill the available space
       ),
     );
@@ -656,9 +668,9 @@ class _FloorLayoutState extends State<FloorLayout> {
 
 class RackPainter extends CustomPainter {
   final List<RackInfo> racks;
-  final int wantedLayoutId;
+  final int wantedLocationId;
 
-  RackPainter({required this.racks, required this.wantedLayoutId});
+  RackPainter({required this.racks, required this.wantedLocationId});
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -668,12 +680,12 @@ class RackPainter extends CustomPainter {
       ..strokeWidth = 1; // TODO: Adjust strokeWidth if necessary
 
     for (var RackInfo(:id, :rack) in racks) {
-      Color color = (id == wantedLayoutId) ? Colors.red : Colors.grey;
+      Color color = (id == wantedLocationId) ? Colors.red : Colors.grey;
       Paint fillPaint = Paint()
         ..color = color.withValues(alpha: 0.5);
 
       canvas.drawRect(rack, fillPaint);
-      if ((id == wantedLayoutId) || true) {
+      if ((id == wantedLocationId) || true) {
         canvas.drawRect(rack, borderPaint);
       }
     }
@@ -695,14 +707,14 @@ class FileNotifier extends ChangeNotifier {
 }
 
 class RackProductList extends StatefulWidget {
-  final int layoutId;
+  final int locationId;
   final List<ProductInfo> productList;
   final String productPath;
   final Function productCallback;
 
   const RackProductList({
     super.key,
-    required this.layoutId,
+    required this.locationId,
     required this.productList,
     required this.productPath,
     required this.productCallback
@@ -746,7 +758,7 @@ class _RackProductListState extends State<RackProductList> {
 
   void _updateProductList(String path, String productId) {
     File productFile = File(path);
-    productFile.writeAsStringSync("\n$productId;${widget.layoutId}", mode: FileMode.append);
+    productFile.writeAsStringSync("\n$productId;${widget.locationId}", mode: FileMode.append);
     // widget.productCallback();
   }
 
@@ -754,7 +766,7 @@ class _RackProductListState extends State<RackProductList> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text("Product List (ID: ${widget.layoutId})"),
+        title: Text("Product List (ID: ${widget.locationId})"),
         actions: [
           IconButton(
             icon: Icon(Icons.add),
