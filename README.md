@@ -1,4 +1,4 @@
-# hm_wilma_locate_product
+# store_locate_product
 
 HM Wilma Locate Product
 
