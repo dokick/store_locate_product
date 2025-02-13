@@ -5,12 +5,20 @@ import "dart:async";
 import "dart:convert";
 import "dart:io";
 
-import "package:csv/csv.dart" as csv;
 import "package:flutter/foundation.dart";  // kDebugMode
 import "package:flutter/gestures.dart";
 import "package:flutter/material.dart";
+import "package:flutter/services.dart";  // PlatformException
+
+import "package:csv/csv.dart" as csv;
+// import "package:dartframe/dartframe.dart" as df;
+// import "package:flutter_barcode_scanner/flutter_barcode_scanner.dart" as barcode;
+import "package:flutter_platform_widgets/flutter_platform_widgets.dart" as platform_widgets;
+import "package:flutter_secure_storage/flutter_secure_storage.dart" as secure_storage;
 import "package:http/http.dart" as http;
+import "package:mobile_scanner/mobile_scanner.dart" as scanner;
 import "package:path_provider/path_provider.dart" as path;
+import "package:permission_handler/permission_handler.dart" as permission;
 import "package:provider/provider.dart" as provider;
 
 // Unit: centimeters
@@ -112,13 +120,13 @@ void main() async {
   if (!productFile.existsSync() || true) {  // TODO: Remember to delete || true
     print("Product file created");
     productFile.createSync(recursive: true, exclusive: false);  // TODO: Remember to change exclusive: true
-    productFile.writeAsStringSync("product_id;layout_id");
+    productFile.writeAsStringSync("product_id;location_id");
   }
 
   runApp(
     provider.ChangeNotifierProvider(
       create: (context) => FileNotifier(),
-      child: HmWilmaLocateProduct(
+      child: StoreLocateProduct(
         layoutPath: layoutFile.path,
         productPath: productFile.path,
       ),
@@ -140,11 +148,11 @@ int findLowestAvailableIndex(List<LayoutInfo> layoutList) {
   return onlyIndexes[onlyIndexes.length - 1] + 1;
 }
 
-class HmWilmaLocateProduct extends StatelessWidget {
+class StoreLocateProduct extends StatelessWidget {
   final String layoutPath;
   final String productPath;
 
-  const HmWilmaLocateProduct({super.key, required this.layoutPath, required this.productPath});
+  const StoreLocateProduct({super.key, required this.layoutPath, required this.productPath});
 
   @override
   Widget build(BuildContext context) {
@@ -186,6 +194,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   List<LayoutInfo> locationList = [];
   List<ProductInfo> productList = [];
   int wantedLocationId = -1;
+  String scannedBarcodeResult = "";
+
+  scanner.Barcode? _barcode;
 
   @override
   void initState() {
@@ -245,7 +256,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     }
     // print(fields[0][0].runtimeType);
     // print(fields[0][1].runtimeType);
-    List<ProductInfo> transformedFields = fields
+    List<ProductInfo> zeroPaddedFields = fields
       .map((List product) {
         int productId = product[0];
         String zeros = "";
@@ -271,22 +282,25 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         return ProductInfo(productId: "$zeros$productId", locationId: product[1]);
       })
       .toList();
-    return transformedFields;
+    return zeroPaddedFields;
   }
 
   (int, Floor) _locateProduct(String productId) {
+    int locationId = -1;
     for (ProductInfo product in productList) {
       if (product.productId == productId) {
-        int layoutId = product.locationId;
-        for (LayoutInfo layout in locationList) {
-          if (layout.id == layoutId) {
-            return (product.locationId, layout.floor);
-          }
-        }
+        locationId = product.locationId;
         break;
       }
     }
-    return (-1, Floor.ground);
+    Floor productFloor = Floor.ground;
+    for (LayoutInfo location in locationList) {
+      if (location.id == locationId) {
+        productFloor = location.floor;
+        break;
+      }
+    }
+    return (locationId, productFloor);
   }
 
   Future<void> _downloadAndReplace() async {
@@ -321,6 +335,39 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
   }
 
+  Future<void> _scanBarcode() async {
+    String barcodeScanResult = "";
+    try {
+      // barcodeScanResult = await barcode.FlutterBarcodeScanner.scanBarcode(
+      //   "ff6666",
+      //   "Cancel",
+      //   true,
+      //   barcode.ScanMode.BARCODE,
+      // );
+      if (kDebugMode) {
+        print(barcodeScanResult);
+      }
+    } on PlatformException {
+      barcodeScanResult = "";
+    }
+
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      scannedBarcodeResult = barcodeScanResult;
+    });
+  }
+
+  void _handleBarcode(scanner.BarcodeCapture barcodes) {
+    if (mounted) {
+      setState(() {
+        _barcode = barcodes.barcodes.firstOrNull;
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     Widget searchBar = SearchAnchor(
@@ -338,7 +385,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       viewOnSubmitted: (String productId) {
         Navigator.of(context).maybePop();
         var (_wantedLocationId, floor) = _locateProduct(productId);
-        int floorNumber;
+        int floorNumber = 0;
         switch (floor) {
           case Floor.ground:
             floorNumber = 0;
@@ -369,10 +416,14 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
     if (!productsLoaded) {
       _loadProducts().then((List<ProductInfo> products) {
-        productList = products;
-        productsLoaded = true;
-        print("Products loaded");
-        print(productList);
+        setState(() {
+          productList = products;
+          productsLoaded = true;
+        });
+        if (kDebugMode) {
+          print("Products loaded");
+          print(productList);
+        }
       });
     }
 
@@ -397,9 +448,15 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             // Here we take the value from the MyHomePage object that was created by
             // the App.build method, and use it to set our appbar title.
             leading: IconButton(
-              icon: Icon(Icons.add),
+              icon: Icon(Icons.edit),
               onPressed: () {
-                // TODO: impl
+                Navigator.push(
+                  context,
+                  platform_widgets.platformPageRoute(
+                    context: context,
+                    builder: (context) => EditPage(),
+                  ),
+                );
               },
             ),
             actions: [
@@ -423,8 +480,40 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
               IconButton(
                 icon: Icon(Icons.camera_alt_outlined),
                 onPressed: () {
-                  // TODO: impl
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => scanner.MobileScanner(
+                        onDetect: _handleBarcode,
+                      ),
+                    ),
+                  );
+                  if (kDebugMode) {
+                    print(_barcode);
+                  }
                 },
+                // onPressed: () => _scanBarcode(), // async {
+                  // if (Platform.isAndroid) {
+                  //   int androidVersion = int.parse(Platform.version.split(".")[0]);
+                  //   if (androidVersion < 10) {
+                  //     // Request permissions differently for Android 9 and below
+                  //     var status = await permission.Permission.camera.status;
+                  //     if (!status.isGranted) {
+                  //       await permission.Permission.camera.request();
+                  //     }
+                  //   }
+                  // }
+                  // permission.PermissionStatus status = await permission.Permission.camera.status;
+                  // if (kDebugMode) {
+                  //   print(status);
+                  // }
+                  // if (!status.isGranted) {
+                  //   await permission.Permission.camera.request();
+                  // }
+                  // if (status.isGranted) {
+                  //   await _scanBarcode();
+                  // }
+                // },
               ),
               searchBar
             ],
@@ -556,7 +645,7 @@ class _FloorLayoutState extends State<FloorLayout> {
         if (racks[i].rack.contains(tapPosition)) {
           List<ProductInfo> productListFiltered = widget.productList
             .where(
-              (ProductInfo product) => racks[i].id == product.locationId,
+              (ProductInfo product) => product.locationId == racks[i].id,
             )
             .toList();
 
@@ -729,12 +818,12 @@ class _RackProductListState extends State<RackProductList> {
   Future<String> _showProductIdEntryDialog(BuildContext context) async {
     TextEditingController textController = TextEditingController(text: "");
 
-    return showDialog<String>(
+    return await showDialog<String>(
       context: context,
       barrierDismissible: true, // false = user must tap button, true = tap outside dialog
       builder: (context) {
         return AlertDialog(
-          title: Text("Enter Product ID"),
+          title: const Text("Enter Product ID"),
           content: TextField(
             controller: textController,
             decoration: const InputDecoration(hintText: "..."),
@@ -753,7 +842,7 @@ class _RackProductListState extends State<RackProductList> {
           ],
         );
       },
-    ).then((productId) => productId ?? "",);
+    ) ?? "";
   }
 
   void _updateProductList(String path, String productId) {
@@ -819,6 +908,156 @@ class _RackProductListState extends State<RackProductList> {
             ),
           );
         }
+      ),
+    );
+  }
+}
+
+class EditPage extends StatefulWidget {
+  const EditPage({super.key});
+
+  @override
+  State<EditPage> createState() => _EditPageState();
+}
+
+class _EditPageState extends State<EditPage> {
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text("Actions"),
+      ),
+      body: ListView(
+        children: [
+          platform_widgets.PlatformTextButton(
+            child: Text(
+              "Update Product List",
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 20,
+              ),
+            ),
+            onPressed: () {
+              // TODO: impl
+            },
+          ),
+          platform_widgets.PlatformTextButton(
+            child: Text(
+              "API Key",
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 20,
+              ),
+            ),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => ApiKeyPage(),
+                ),
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class SecureApiKeyStorage {
+  static const _storage = secure_storage.FlutterSecureStorage();
+  static const _apiKey = "pastebin_api_key";
+
+  static Future<void> saveApiKey(String apiKey) async {
+    await _storage.write(key: _apiKey, value: apiKey);
+  }
+
+  static Future<String> getApiKey() async {
+    return await _storage.read(key: _apiKey) ?? "";
+  }
+}
+
+class ApiKeyPage extends StatefulWidget {
+  const ApiKeyPage({super.key});
+
+  @override
+  State<ApiKeyPage> createState() => _ApiKeyPageState();
+}
+
+class _ApiKeyPageState extends State<ApiKeyPage> {
+  final TextEditingController _controller = TextEditingController();
+  String _savedApiKey = "";
+  bool _isObscure = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadApiKey();
+  }
+
+  Future<void> _loadApiKey() async {
+    String apiKey = await SecureApiKeyStorage.getApiKey();
+    setState(() {
+      _savedApiKey = apiKey;
+      _controller.text = apiKey;
+    });
+  }
+
+  Future<void> _saveApiKey() async {
+    await SecureApiKeyStorage.saveApiKey(_controller.text);
+    setState(() {
+      _savedApiKey = _controller.text;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text("Pastebin API Key"),
+      ),
+      body: Padding(
+        padding: EdgeInsets.all(16.0),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            TextField(
+              obscureText: _isObscure, // Hides API key
+              controller: _controller,
+              decoration: InputDecoration(
+                labelText: "Enter Pastebin API Key",
+                border: OutlineInputBorder(),
+                suffixIcon: platform_widgets.PlatformIconButton(
+                  icon: Icon(_isObscure ? Icons.visibility : Icons.visibility_off),
+                  onPressed: () {
+                    setState(() {
+                      _isObscure = !_isObscure;
+                    });
+                  },
+                )
+              ),
+            ),
+            SizedBox(height: 20),
+            platform_widgets.PlatformElevatedButton(
+              onPressed: _saveApiKey,
+              child: Text(
+                "Save API Key",
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 20,
+                ),
+              ),
+            ),
+            SizedBox(height: 20),
+            Text(
+              _savedApiKey.length != 0 ? "API Key Saved Securely" : "No API Key Saved",
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            ),
+          ],
+        ),
       ),
     );
   }
