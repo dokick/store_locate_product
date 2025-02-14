@@ -21,6 +21,10 @@ import "package:path_provider/path_provider.dart" as path;
 import "package:permission_handler/permission_handler.dart" as permission;
 import "package:provider/provider.dart" as provider;
 
+const String locationListFilename = "locations.csv";
+const String productListFilename = "products.csv";
+
+// TODO: StoreDimensions should be configurable, but only one store is targeted right now
 // Unit: centimeters
 class StoreDimensions {
   // Notice that it says groundFloor and continuing, because the first floor corresponds to floor 1
@@ -33,6 +37,7 @@ class StoreDimensions {
   static const int secondFloorHeight = 1000;  // cm
 }
 
+// TODO: Number of floors should be configurable, but only one store is targeted right now
 enum Floor {
   ground,
   first,
@@ -40,7 +45,7 @@ enum Floor {
 }
 
 @immutable
-class LayoutInfo {
+class Location {
   final int id;
   final Floor floor;
   final int x0;  // cm
@@ -48,7 +53,7 @@ class LayoutInfo {
   final int a;  // cm
   final int b;  // cm
 
-  const LayoutInfo({
+  const Location({
     required this.id,
     required this.floor,
     required this.x0,
@@ -93,7 +98,7 @@ class ProductInfo {
 
   @override
   String toString() {
-    return "{productId: $productId, layoutId: $locationId}";
+    return "{productId: $productId, locationId: $locationId}";
   }
 }
 
@@ -102,41 +107,38 @@ void main() async {
 
   final Directory appCacheDir = await path.getApplicationCacheDirectory();
   appCacheDir.createSync(recursive: true);
-  Directory configDir = Directory("${appCacheDir.path}/config");
-  configDir.createSync(recursive: true);
   print("Cache directory found");
-  print("config: $configDir");
+  print("cache: $appCacheDir");
 
   // x0 and a are orthogonal to the entrance and y0 and b are parallel
-  // In layout.csv y0, y0, a and b are given in centimeters
-  File layoutFile = File("${configDir.path}/locations.csv");
-  if (!layoutFile.existsSync() || true) {  // TODO: Remember to delete || true
-    print("Layout file created");
-    layoutFile.createSync(recursive: true, exclusive: false);  // TODO: Remember to change exclusive: true
-    layoutFile.writeAsStringSync("id;floor;x0;y0;a;b");
+  // In location.csv y0, y0, a and b are given in centimeters
+  File locationListFile = File(getLocationListPath(appCacheDir));
+  if (!locationListFile.existsSync() || true) {  // TODO: Remember to delete || true
+    print("Location list file created");
+    locationListFile.createSync(recursive: true, exclusive: false);  // TODO: Remember to change exclusive: true
+    locationListFile.writeAsStringSync("id;floor;x0;y0;a;b");
   }
 
-  File productFile = File("${configDir.path}/products.csv");
-  if (!productFile.existsSync() || true) {  // TODO: Remember to delete || true
-    print("Product file created");
-    productFile.createSync(recursive: true, exclusive: false);  // TODO: Remember to change exclusive: true
-    productFile.writeAsStringSync("product_id;location_id");
+  File productListFile = File(getProductListPath(appCacheDir));
+  if (!productListFile.existsSync() || true) {  // TODO: Remember to delete || true
+    print("Product list file created");
+    productListFile.createSync(recursive: true, exclusive: false);  // TODO: Remember to change exclusive: true
+    productListFile.writeAsStringSync("product_id;location_id");
   }
 
   runApp(
     provider.ChangeNotifierProvider(
       create: (context) => FileNotifier(),
       child: StoreLocateProduct(
-        layoutPath: layoutFile.path,
-        productPath: productFile.path,
+        cacheDir: appCacheDir,
       ),
     )
   );
 }
 
-int findLowestAvailableIndex(List<LayoutInfo> layoutList) {
-  List<int> onlyIndexes = layoutList
-    .map((LayoutInfo layout) => layout.id)
+int findLowestAvailableIndex(List<Location> locationList) {
+  List<int> onlyIndexes = locationList
+    .map((Location location) => location.id)
     .toList();
   onlyIndexes.sort((a, b) => a.compareTo(b));
 
@@ -148,11 +150,27 @@ int findLowestAvailableIndex(List<LayoutInfo> layoutList) {
   return onlyIndexes[onlyIndexes.length - 1] + 1;
 }
 
-class StoreLocateProduct extends StatelessWidget {
-  final String layoutPath;
-  final String productPath;
+String getLocationListPath(Directory cacheDir) {
+  return "${cacheDir.path}/$locationListFilename";
+}
 
-  const StoreLocateProduct({super.key, required this.layoutPath, required this.productPath});
+String getProductListPath(Directory cacheDir) {
+  return "${cacheDir.path}/$productListFilename";
+}
+
+Future<List<List<dynamic>>> readCsv(String path) async {
+  final stream = File(path).openRead();
+  return await stream
+      .transform(utf8.decoder)
+      .transform(csv.CsvToListConverter(fieldDelimiter: ";", eol: "\n"))
+      .skip(1)
+      .toList();
+}
+
+class StoreLocateProduct extends StatelessWidget {
+  final Directory cacheDir;
+
+  const StoreLocateProduct({super.key, required this.cacheDir});
 
   @override
   Widget build(BuildContext context) {
@@ -164,8 +182,7 @@ class StoreLocateProduct extends StatelessWidget {
       ),
       home: HomePage(
         title: 'HM Wilma Locate Product',
-        layoutPath: layoutPath,
-        productPath: productPath,
+        cacheDir: cacheDir,
       ),
     );
   }
@@ -173,14 +190,12 @@ class StoreLocateProduct extends StatelessWidget {
 
 class HomePage extends StatefulWidget {
   final String title;
-  final String layoutPath;
-  final String productPath;
+  final Directory cacheDir;
 
   const HomePage({
     super.key,
     required this.title,
-    required this.layoutPath,
-    required this.productPath,
+    required this.cacheDir,
   });
 
   @override
@@ -191,7 +206,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   late TabController _floors;
   bool locationsLoaded = false;
   bool productsLoaded = false;
-  List<LayoutInfo> locationList = [];
+  List<Location> locationList = [];
   List<ProductInfo> productList = [];
   int wantedLocationId = -1;
   String scannedBarcodeResult = "";
@@ -206,15 +221,18 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
   // TODO: Consider switching to dartframe https://pub.dev/packages/dartframe
 
-  Future<List<LayoutInfo>> _loadLayout() async {
-    final stream = File(widget.layoutPath).openRead();
-    final fields = await stream
-      .transform(utf8.decoder)
-      .transform(csv.CsvToListConverter(fieldDelimiter: ";", eol: "\n"))
-      .skip(1)
-      .map((List layout) {
+  Future<List<Location>> _loadLocations() async {
+    // final stream = File().openRead();
+    // final fields = await stream
+    //   .transform(utf8.decoder)
+    //   .transform(csv.CsvToListConverter(fieldDelimiter: ";", eol: "\n"))
+    //   .skip(1)
+    //   .toList;
+    final fields = await readCsv(getLocationListPath(widget.cacheDir));
+    return fields
+      .map((List location) {
         Floor floor = Floor.ground;
-        switch (layout[1]) {
+        switch (location[1]) {
           case 0:
             floor = Floor.ground;
           case 1:
@@ -224,33 +242,26 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           default:
             floor = Floor.ground;
         }
-        return LayoutInfo(
-          id: layout[0],
+        return Location(
+          id: location[0],
           floor: floor,
-          x0: layout[2].toInt(),
-          y0: layout[3].toInt(),
-          a: layout[4].toInt(),
-          b: layout[5].toInt(),
+          x0: location[2].toInt(),
+          y0: location[3].toInt(),
+          a: location[4].toInt(),
+          b: location[5].toInt(),
         );
       })
       .toList();
-    if (kDebugMode) {
-      print("Inside of loadLayout: $fields");
-    }
-    // print(fields[0].x0);
-    // print(fields[0].x0.runtimeType);
-    // print(fields[0].y0);
-    // print(fields[0].y0.runtimeType);
-    return fields;
   }
 
   Future<List<ProductInfo>> _loadProducts() async {
-    final stream = File(widget.productPath).openRead();
-    final fields = await stream
-      .transform(utf8.decoder)
-      .transform(csv.CsvToListConverter(fieldDelimiter: ";", eol: "\n"))
-      .skip(1)
-      .toList();
+    // final stream = File(getProductListPath(widget.cacheDir)).openRead();
+    // final fields = await stream
+    //   .transform(utf8.decoder)
+    //   .transform(csv.CsvToListConverter(fieldDelimiter: ";", eol: "\n"))
+    //   .skip(1)
+    //   .toList();
+    final fields = await readCsv(getProductListPath(widget.cacheDir));
     if (kDebugMode) {
       print("Raw: $fields");
     }
@@ -294,7 +305,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       }
     }
     Floor productFloor = Floor.ground;
-    for (LayoutInfo location in locationList) {
+    if (locationId == -1) return (locationId, productFloor);  // early return, because product couldn't be found
+    for (Location location in locationList) {
       if (location.id == locationId) {
         productFloor = location.floor;
         break;
@@ -310,7 +322,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     try {
       final response = await http.get(Uri.parse(locationsCsvUrl));
       if (response.statusCode == 200) {
-        final file = File(widget.layoutPath);
+        final file = File(getLocationListPath(widget.cacheDir));
         await file.writeAsString(response.body);
         if (kDebugMode) {
           print('Downloaded and replaced');
@@ -323,7 +335,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     try {
       final response = await http.get(Uri.parse(productsCsvUrl));
       if (response.statusCode == 200) {
-        final file = File(widget.productPath);
+        final file = File(getProductListPath(widget.cacheDir));
         await file.writeAsString(response.body);
         if (kDebugMode) {
           print('Downloaded and replaced');
@@ -402,13 +414,13 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     );
 
     if (!locationsLoaded) {
-      _loadLayout().then((List<LayoutInfo> location) {
+      _loadLocations().then((List<Location> location) {
         setState(() {
           locationList = location;
           locationsLoaded = true;
         });
         if (kDebugMode) {
-          print("Layout loaded");
+          print("Locations loaded");
           print(locationList);
         }
       });
@@ -427,14 +439,14 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       });
     }
 
-    List<LayoutInfo> groundFloorLayoutTable = locationList
-      .where((LayoutInfo location) => location.floor == Floor.ground)
+    List<Location> groundFloorLayoutList = locationList
+      .where((Location location) => location.floor == Floor.ground)
       .toList();
-    List<LayoutInfo> firstFloorLayoutTable = locationList
-      .where((LayoutInfo location) => location.floor == Floor.first)
+    List<Location> firstFloorLayoutList = locationList
+      .where((Location location) => location.floor == Floor.first)
       .toList();
-    List<LayoutInfo> secondFloorLayoutTable = locationList
-      .where((LayoutInfo location) => location.floor == Floor.second)
+    List<Location> secondFloorLayoutList = locationList
+      .where((Location location) => location.floor == Floor.second)
       .toList();
 
     return provider.Consumer<FileNotifier>(
@@ -448,23 +460,25 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             // Here we take the value from the MyHomePage object that was created by
             // the App.build method, and use it to set our appbar title.
             leading: IconButton(
-              icon: Icon(Icons.edit),
+              icon: const Icon(Icons.edit),
               onPressed: () {
                 Navigator.push(
                   context,
                   platform_widgets.platformPageRoute(
                     context: context,
-                    builder: (context) => EditPage(),
+                    builder: (context) => EditPage(
+                      cacheDir: widget.cacheDir,
+                    ),
                   ),
                 );
               },
             ),
             actions: [
               IconButton(
-                icon: Icon(Icons.sync),
+                icon: const Icon(Icons.sync),
                 onPressed: () async {
                   await _downloadAndReplace();
-                  _loadLayout().then((List<LayoutInfo> locations) {
+                  _loadLocations().then((List<Location> locations) {
                     setState(() {
                       locationList = locations;
                     });
@@ -538,27 +552,27 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
               FloorLayout(
                 key: ValueKey(wantedLocationId + 0),
                 floor: Floor.ground,
-                locationList: groundFloorLayoutTable,
+                locationList: groundFloorLayoutList,
                 productList: productList,
-                productPath: widget.productPath,
+                cacheDir: widget.cacheDir,
                 wantedLocationId: wantedLocationId,
                 productCallback: _loadProducts,
               ),
               FloorLayout(
                 key: ValueKey(wantedLocationId + 1),
                 floor: Floor.first,
-                locationList: firstFloorLayoutTable,
+                locationList: firstFloorLayoutList,
                 productList: productList,
-                productPath: widget.productPath,
+                cacheDir: widget.cacheDir,
                 wantedLocationId: wantedLocationId,
                 productCallback: _loadProducts,
               ),
               FloorLayout(
                 key: ValueKey(wantedLocationId + 2),
                 floor: Floor.second,
-                locationList: secondFloorLayoutTable,
+                locationList: secondFloorLayoutList,
                 productList: productList,
-                productPath: widget.productPath,
+                cacheDir: widget.cacheDir,
                 wantedLocationId: wantedLocationId,
                 productCallback: _loadProducts,
               ),
@@ -572,9 +586,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
 class FloorLayout extends StatefulWidget {
   final Floor floor;
-  final List<LayoutInfo> locationList;
+  final List<Location> locationList;
   final List<ProductInfo> productList;
-  final String productPath;
+  final Directory cacheDir;
   final int wantedLocationId;
   final Function productCallback;
 
@@ -583,7 +597,7 @@ class FloorLayout extends StatefulWidget {
     required this.floor,
     required this.locationList,
     required this.productList,
-    required this.productPath,
+    required this.cacheDir,
     required this.wantedLocationId,
     required this.productCallback,
   });
@@ -655,7 +669,7 @@ class _FloorLayoutState extends State<FloorLayout> {
               builder: (context) => RackProductList(
                 locationId: racks[i].id,
                 productList: productListFiltered,
-                productPath: widget.productPath,
+                cacheDir: widget.cacheDir,
                 productCallback: widget.productCallback,
               ),
             ),
@@ -710,7 +724,7 @@ class _FloorLayoutState extends State<FloorLayout> {
   @override
   Widget build(BuildContext context) {
     racks = widget.locationList
-      .map((LayoutInfo layout) {
+      .map((Location location) {
         // Converting into device specific measurements
         double deviceWidth = MediaQuery.sizeOf(context).width;
         double deviceHeight = MediaQuery.sizeOf(context).height;
@@ -733,12 +747,12 @@ class _FloorLayoutState extends State<FloorLayout> {
           }
         }
         // double[px] = double[px] * int[cm] / int[cm]
-        double x0 = deviceWidth * layout.x0 / realWidth;
-        double y0 = deviceHeight * layout.y0 / realHeight;
-        double a = deviceWidth * layout.a / realWidth;
-        double b = deviceHeight * layout.b / realHeight;
+        double x0 = deviceWidth * location.x0 / realWidth;
+        double y0 = deviceHeight * location.y0 / realHeight;
+        double a = deviceWidth * location.a / realWidth;
+        double b = deviceHeight * location.b / realHeight;
 
-        return RackInfo(id: layout.id, floor: widget.floor, rack: Rect.fromLTWH(x0, y0, a, b));
+        return RackInfo(id: location.id, floor: widget.floor, rack: Rect.fromLTWH(x0, y0, a, b));
       })
       .toList();
 
@@ -798,14 +812,14 @@ class FileNotifier extends ChangeNotifier {
 class RackProductList extends StatefulWidget {
   final int locationId;
   final List<ProductInfo> productList;
-  final String productPath;
+  final Directory cacheDir;
   final Function productCallback;
 
   const RackProductList({
     super.key,
     required this.locationId,
     required this.productList,
-    required this.productPath,
+    required this.cacheDir,
     required this.productCallback
   });
 
@@ -814,6 +828,7 @@ class RackProductList extends StatefulWidget {
 }
 
 class _RackProductListState extends State<RackProductList> {
+  List<String> literalDigits = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"];
 
   Future<String> _showProductIdEntryDialog(BuildContext context) async {
     TextEditingController textController = TextEditingController(text: "");
@@ -845,10 +860,24 @@ class _RackProductListState extends State<RackProductList> {
     ) ?? "";
   }
 
-  void _updateProductList(String path, String productId) {
-    File productFile = File(path);
-    productFile.writeAsStringSync("\n$productId;${widget.locationId}", mode: FileMode.append);
-    // widget.productCallback();
+  void _addToNewProductList(String productId) {
+    File newProductFile = File("${widget.cacheDir.path}/new_products.csv");
+    if (!newProductFile.existsSync()) {
+      newProductFile.createSync(exclusive: false);
+      newProductFile.writeAsStringSync("product_id;location_id");
+    }
+    newProductFile.writeAsStringSync("\n$productId;${widget.locationId}", mode: FileMode.append);
+  }
+
+  bool _validateProductId(String productId) {
+    bool digitsOnly = true;
+    for (String char in productId.characters) {
+      if (!literalDigits.contains(char)) {
+        digitsOnly = false;
+        break;
+      }
+    }
+    return productId.length == 10 && digitsOnly;
   }
 
   @override
@@ -857,6 +886,12 @@ class _RackProductListState extends State<RackProductList> {
       appBar: AppBar(
         title: Text("Product List (ID: ${widget.locationId})"),
         actions: [
+          platform_widgets.PlatformIconButton(
+            icon: Icon(Icons.camera_alt_outlined),
+            onPressed: () {
+              // TODO: impl
+            },
+          ),
           IconButton(
             icon: Icon(Icons.add),
             onPressed: () async {
@@ -883,15 +918,12 @@ class _RackProductListState extends State<RackProductList> {
               // );
 
               String receivedProductId = await _showProductIdEntryDialog(context);
-              if (receivedProductId.isNotEmpty && receivedProductId.length == 10) {
-                _updateProductList(widget.productPath, receivedProductId);
-                var newContent = File(widget.productPath).readAsStringSync(encoding: utf8);
-                provider.Provider.of<FileNotifier>(context, listen: false)
-                  .updateContent(newContent);
+              if (_validateProductId(receivedProductId)) {
+                _addToNewProductList(receivedProductId);
               }
               // TODO: impl
             },
-          )
+          ),
         ],
       ),
       body: ListView.builder(
@@ -914,7 +946,9 @@ class _RackProductListState extends State<RackProductList> {
 }
 
 class EditPage extends StatefulWidget {
-  const EditPage({super.key});
+  final Directory cacheDir;
+
+  const EditPage({super.key, required this.cacheDir});
 
   @override
   State<EditPage> createState() => _EditPageState();
@@ -939,6 +973,14 @@ class _EditPageState extends State<EditPage> {
               ),
             ),
             onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => UpdateProductsPage(
+                    cacheDir: widget.cacheDir,
+                  ),
+                ),
+              );
               // TODO: impl
             },
           ),
@@ -962,6 +1004,64 @@ class _EditPageState extends State<EditPage> {
           ),
         ],
       ),
+    );
+  }
+}
+
+class UpdateProductsPage extends StatefulWidget {
+  final Directory cacheDir;
+
+  const UpdateProductsPage({super.key, required this.cacheDir});
+
+  @override
+  State<UpdateProductsPage> createState() => _UpdateProductsPageState();
+}
+
+class _UpdateProductsPageState extends State<UpdateProductsPage> {
+  List<ProductInfo> newProductList = [];
+
+  @override
+  void initState() async {
+    // TODO: implement initState
+    super.initState();
+    final fields = await readCsv("${widget.cacheDir.path}/new_products.csv");
+    newProductList = fields
+      .map((List product) {
+        int productId = product[0];
+        String zeros = "";
+        if (productId < 10) {
+          zeros = "0" * 9;
+        } else if (productId < 100) {
+          zeros = "0" * 8;
+        } else if (productId < 1_000) {
+          zeros = "0" * 7;
+        } else if (productId < 10_000) {
+          zeros = "0" * 6;
+        } else if (productId < 100_000) {
+          zeros = "0" * 5;
+        } else if (productId < 1_000_000) {
+          zeros = "0" * 4;
+        } else if (productId < 10_000_000) {
+          zeros = "0" * 3;
+        } else if (productId < 100_000_000) {
+          zeros = "0" * 2;
+        } else if (productId < 1_000_000_000) {
+          zeros = "0" * 1;
+        }
+        return ProductInfo(productId: "$zeros$productId", locationId: product[1]);
+      })
+      .toList();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView.builder(
+      itemCount: newProductList.length,
+      itemBuilder: (context, index) {
+        return ListTile(
+          // TODO: impl
+        );
+      },
     );
   }
 }
