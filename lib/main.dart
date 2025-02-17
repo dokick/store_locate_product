@@ -11,7 +11,6 @@ import "package:flutter/material.dart";
 import "package:flutter/services.dart";  // PlatformException
 
 import "package:csv/csv.dart" as csv;
-// import "package:dartframe/dartframe.dart" as df;
 // import "package:flutter_barcode_scanner/flutter_barcode_scanner.dart" as barcode;
 import "package:flutter_platform_widgets/flutter_platform_widgets.dart" as platform_widgets;
 import "package:flutter_secure_storage/flutter_secure_storage.dart" as secure_storage;
@@ -269,12 +268,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   // TODO: Consider switching to dartframe https://pub.dev/packages/dartframe
 
   Future<List<Location>> _loadLocations() async {
-    // final stream = File().openRead();
-    // final fields = await stream
-    //   .transform(utf8.decoder)
-    //   .transform(csv.CsvToListConverter(fieldDelimiter: ";", eol: "\n"))
-    //   .skip(1)
-    //   .toList;
     final fields = await readCsv(getLocationListPath(widget.cacheDir));
     return fields
       .map((List location) {
@@ -396,7 +389,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   Widget build(BuildContext context) {
     Widget searchBar = SearchAnchor(
       builder: (BuildContext context, SearchController controller) {
-        return IconButton(
+        return platform_widgets.PlatformIconButton(
           icon: const Icon(Icons.search),
           onPressed: () {
             controller.openView();
@@ -471,8 +464,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             backgroundColor: Theme.of(context).colorScheme.inversePrimary,
             // Here we take the value from the MyHomePage object that was created by
             // the App.build method, and use it to set our appbar title.
-            leading: IconButton(
-              icon: const Icon(Icons.edit),
+            leading: platform_widgets.PlatformIconButton(
+              icon: const Icon(Icons.settings),
               onPressed: () {
                 Navigator.push(
                   context,
@@ -486,7 +479,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
               },
             ),
             actions: [
-              IconButton(
+              platform_widgets.PlatformIconButton(
                 icon: const Icon(Icons.sync),
                 onPressed: () async {
                   await _downloadAndReplace();
@@ -500,11 +493,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                       productList = products;
                     });
                   });
-                  // TODO: impl
                 },
               ),
-              IconButton(
-                icon: Icon(Icons.camera_alt_outlined),
+              platform_widgets.PlatformIconButton(
+                icon: const Icon(Icons.camera_alt_outlined),
                 onPressed: () {
                   Navigator.push(
                     context,
@@ -517,6 +509,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                   if (kDebugMode) {
                     print(_barcode);
                   }
+                  // TODO: impl
                 },
                 // onPressed: () => _scanBarcode(), // async {
                   // if (Platform.isAndroid) {
@@ -640,13 +633,13 @@ class _FloorLayoutState extends State<FloorLayout> {
                 title: const Text("Deleting location"),
                 content: const Text("Do you want to delete this location?"),
                 actions: <Widget>[
-                  TextButton(
+                  platform_widgets.PlatformTextButton(
                     child: const Text("Cancel"),
                     onPressed: () {
                       Navigator.of(dialogContext).pop();
                     },
                   ),
-                  TextButton(
+                  platform_widgets.PlatformTextButton(
                     child: const Text("Delete"),
                     onPressed: () {
                       // TODO: impl
@@ -859,13 +852,13 @@ class _RackProductListState extends State<RackProductList> {
             decoration: const InputDecoration(hintText: "..."),
           ),
           actions: <Widget>[
-            TextButton(
+            platform_widgets.PlatformTextButton(
               onPressed: () {
                 Navigator.pop(context, "");
               },
               child: const Text("Cancel"),
             ),
-            TextButton(
+            platform_widgets.PlatformTextButton(
               onPressed: () => Navigator.pop(context, textController.text),
               child: const Text("Submit"),
             )
@@ -902,13 +895,13 @@ class _RackProductListState extends State<RackProductList> {
         title: Text("Product List (ID: ${widget.locationId})"),
         actions: [
           platform_widgets.PlatformIconButton(
-            icon: Icon(Icons.camera_alt_outlined),
+            icon: const Icon(Icons.camera_alt_outlined),
             onPressed: () {
               // TODO: impl
             },
           ),
-          IconButton(
-            icon: Icon(Icons.add),
+          platform_widgets.PlatformIconButton(
+            icon: const Icon(Icons.add),
             onPressed: () async {
               // Navigator.push(
               //   context,
@@ -947,8 +940,8 @@ class _RackProductListState extends State<RackProductList> {
           String productId = widget.productList[index].id;
           return ListTile(
             title: Text("${productId.substring(0, 7)} ${productId.substring(7, 10)}"),
-            trailing: IconButton(
-              icon: Icon(Icons.delete),
+            trailing: platform_widgets.PlatformIconButton(
+              icon: const Icon(Icons.delete),
               onPressed: () {
                 // TODO: impl
               },
@@ -1018,7 +1011,7 @@ class _EditPageState extends State<EditPage> {
             },
           ),
           platform_widgets.PlatformTextButton(
-            child: Text(
+            child: const Text(
               "Username & Password",
               textAlign: TextAlign.center,
               style: TextStyle(
@@ -1275,10 +1268,10 @@ class _ApiKeyPageState extends State<ApiKeyPage> {
                 )
               ),
             ),
-            SizedBox(height: 20),
+            const SizedBox(height: 20),
             platform_widgets.PlatformElevatedButton(
               onPressed: _saveApiKey,
-              child: Text(
+              child: const Text(
                 "Save API Key",
                 textAlign: TextAlign.center,
                 style: TextStyle(
@@ -1287,10 +1280,10 @@ class _ApiKeyPageState extends State<ApiKeyPage> {
                 ),
               ),
             ),
-            SizedBox(height: 20),
+            const SizedBox(height: 20),
             Text(
               _savedApiKey.length != 0 ? "API Key Saved Securely" : "No API Key Saved",
-              style: TextStyle(
+              style: const TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.bold,
               ),
@@ -1358,7 +1351,7 @@ class _CredentialPageState extends State<CredentialPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text("Pastebin Username And Password"),
+        title: const Text("Pastebin Username And Password"),
       ),
       body: Padding(
         padding: EdgeInsets.all(16.0),
@@ -1381,7 +1374,7 @@ class _CredentialPageState extends State<CredentialPage> {
                   )
               ),
             ),
-            SizedBox(height: 20),
+            const SizedBox(height: 20),
             TextField(
               obscureText: _isPasswordObscure, // Hides API key
               controller: _passwordController,
@@ -1398,13 +1391,13 @@ class _CredentialPageState extends State<CredentialPage> {
                   )
               ),
             ),
-            SizedBox(height: 20),
+            const SizedBox(height: 20),
             platform_widgets.PlatformElevatedButton(
               onPressed: () {
                 _saveUsername();
                 _savePassword();
               },
-              child: Text(
+              child: const Text(
                 "Save Credentials",
                 textAlign: TextAlign.center,
                 style: TextStyle(
@@ -1413,17 +1406,17 @@ class _CredentialPageState extends State<CredentialPage> {
                 ),
               ),
             ),
-            SizedBox(height: 20),
+            const SizedBox(height: 20),
             Text(
               _savedUsername.length != 0 ? "Username Saved Securely" : "No Username Saved",
-              style: TextStyle(
+              style: const TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.bold,
               ),
             ),
             Text(
               _savedPassword.length != 0 ? "Password Saved Securely" : "No Password Saved",
-              style: TextStyle(
+              style: const TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.bold,
               ),
