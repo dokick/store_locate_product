@@ -30,7 +30,7 @@ class StoreDimensions {
   // Notice that it says groundFloor and continuing, because the first floor corresponds to floor 1
   // american vs german floor counting
   static const int groundFloorWidth = 1700;  // cm (pointing south)
-  static const int groundFloorHeight = 4000;  // cm (pointing west)
+  static const int groundFloorHeight = 4200;  // cm (pointing west)
   static const int firstFloorWidth = 3100;  // cm (pointing east)
   static const int firstFloorHeight = 4500;  // cm (pointing south)
   static const int secondFloorWidth = 1000;  // cm
@@ -62,6 +62,19 @@ class Location {
     required this.b,
   });
 
+  List<int> toList() {
+    int floorNumber;
+    switch (this.floor) {
+      case Floor.ground:
+        floorNumber = 0;
+      case Floor.first:
+        floorNumber = 1;
+      case Floor.second:
+        floorNumber = 2;
+    }
+    return [id, floorNumber, x0, y0, a, b];
+  }
+
   @override
   String toString() {
     return "{id: $id, floor: $floor, x0: $x0, y0: $y0, a: $a, b: $b}";
@@ -87,18 +100,22 @@ class RackInfo {
 }
 
 @immutable
-class ProductInfo {
-  final String productId;
+class Product {
+  final String id;
   final int locationId;
 
-  const ProductInfo({
-    required this.productId,
+  const Product({
+    required this.id,
     required this.locationId,
   });
 
+  List<String> toList() {
+    return [id, locationId.toString()];
+  }
+
   @override
   String toString() {
-    return "{productId: $productId, locationId: $locationId}";
+    return "{productId: $id, locationId: $locationId}";
   }
 }
 
@@ -161,10 +178,40 @@ String getProductListPath(Directory cacheDir) {
 Future<List<List<dynamic>>> readCsv(String path) async {
   final stream = File(path).openRead();
   return await stream
-      .transform(utf8.decoder)
-      .transform(csv.CsvToListConverter(fieldDelimiter: ";", eol: "\n"))
-      .skip(1)
-      .toList();
+    .transform(utf8.decoder)
+    .transform(csv.CsvToListConverter(fieldDelimiter: ";", eol: "\n"))
+    .skip(1)
+    .toList();
+}
+
+Future<List<Product>> readProductList(String path) async {
+  final List<List<dynamic>> fields = await readCsv(path);
+  return fields
+    .map((List product) {
+      int productId = product[0];
+      String zeros = "";
+      if (productId < 10) {
+        zeros = "0" * 9;
+      } else if (productId < 100) {
+        zeros = "0" * 8;
+      } else if (productId < 1_000) {
+        zeros = "0" * 7;
+      } else if (productId < 10_000) {
+        zeros = "0" * 6;
+      } else if (productId < 100_000) {
+        zeros = "0" * 5;
+      } else if (productId < 1_000_000) {
+        zeros = "0" * 4;
+      } else if (productId < 10_000_000) {
+        zeros = "0" * 3;
+      } else if (productId < 100_000_000) {
+        zeros = "0" * 2;
+      } else if (productId < 1_000_000_000) {
+        zeros = "0" * 1;
+      }
+      return Product(id: "$zeros$productId", locationId: product[1]);
+    })
+    .toList();
 }
 
 class StoreLocateProduct extends StatelessWidget {
@@ -207,7 +254,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   bool locationsLoaded = false;
   bool productsLoaded = false;
   List<Location> locationList = [];
-  List<ProductInfo> productList = [];
+  List<Product> productList = [];
   int wantedLocationId = -1;
   String scannedBarcodeResult = "";
 
@@ -254,52 +301,14 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       .toList();
   }
 
-  Future<List<ProductInfo>> _loadProducts() async {
-    // final stream = File(getProductListPath(widget.cacheDir)).openRead();
-    // final fields = await stream
-    //   .transform(utf8.decoder)
-    //   .transform(csv.CsvToListConverter(fieldDelimiter: ";", eol: "\n"))
-    //   .skip(1)
-    //   .toList();
-    final fields = await readCsv(getProductListPath(widget.cacheDir));
-    if (kDebugMode) {
-      print("Raw: $fields");
-    }
-    // print(fields[0][0].runtimeType);
-    // print(fields[0][1].runtimeType);
-    List<ProductInfo> zeroPaddedFields = fields
-      .map((List product) {
-        int productId = product[0];
-        String zeros = "";
-        if (productId < 10) {
-          zeros = "0" * 9;
-        } else if (productId < 100) {
-          zeros = "0" * 8;
-        } else if (productId < 1_000) {
-          zeros = "0" * 7;
-        } else if (productId < 10_000) {
-          zeros = "0" * 6;
-        } else if (productId < 100_000) {
-          zeros = "0" * 5;
-        } else if (productId < 1_000_000) {
-          zeros = "0" * 4;
-        } else if (productId < 10_000_000) {
-          zeros = "0" * 3;
-        } else if (productId < 100_000_000) {
-          zeros = "0" * 2;
-        } else if (productId < 1_000_000_000) {
-          zeros = "0" * 1;
-        }
-        return ProductInfo(productId: "$zeros$productId", locationId: product[1]);
-      })
-      .toList();
-    return zeroPaddedFields;
+  Future<List<Product>> _loadProducts() async {
+    return await readProductList(getProductListPath(widget.cacheDir));
   }
 
   (int, Floor) _locateProduct(String productId) {
     int locationId = -1;
-    for (ProductInfo product in productList) {
-      if (product.productId == productId) {
+    for (Product product in productList) {
+      if (product.id == productId) {
         locationId = product.locationId;
         break;
       }
@@ -317,7 +326,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
   Future<void> _downloadAndReplace() async {
     final locationsCsvUrl = "https://pastebin.com/raw/MMruJhV9";
-    final productsCsvUrl = "https://pastebin.com/raw/TzRVGAhP";
+    final productsPointerCsvUrl = "https://pastebin.com/raw/uZ4MzZdT";
 
     try {
       final response = await http.get(Uri.parse(locationsCsvUrl));
@@ -325,7 +334,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         final file = File(getLocationListPath(widget.cacheDir));
         await file.writeAsString(response.body);
         if (kDebugMode) {
-          print('Downloaded and replaced');
+          print('Downloaded locations.csv and replaced');
         }
       }
     } catch (e) {
@@ -333,12 +342,15 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     }
 
     try {
-      final response = await http.get(Uri.parse(productsCsvUrl));
-      if (response.statusCode == 200) {
-        final file = File(getProductListPath(widget.cacheDir));
-        await file.writeAsString(response.body);
-        if (kDebugMode) {
-          print('Downloaded and replaced');
+      final responsePointer = await http.get(Uri.parse(productsPointerCsvUrl));
+      if (responsePointer.statusCode == 200) {
+        final response = await http.get(Uri.parse("https://pastebin.com/raw/${responsePointer.body}"));
+        if (response.statusCode == 200) {
+          final file = File(getProductListPath(widget.cacheDir));
+          await file.writeAsString(response.body);
+          if (kDebugMode) {
+            print('Downloaded products.csv and replaced');
+          }
         }
       }
     } catch (e) {
@@ -427,7 +439,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     }
 
     if (!productsLoaded) {
-      _loadProducts().then((List<ProductInfo> products) {
+      _loadProducts().then((List<Product> products) {
         setState(() {
           productList = products;
           productsLoaded = true;
@@ -483,7 +495,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                       locationList = locations;
                     });
                   });
-                  _loadProducts().then((List<ProductInfo> products) {
+                  _loadProducts().then((List<Product> products) {
                     setState(() {
                       productList = products;
                     });
@@ -587,7 +599,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 class FloorLayout extends StatefulWidget {
   final Floor floor;
   final List<Location> locationList;
-  final List<ProductInfo> productList;
+  final List<Product> productList;
   final Directory cacheDir;
   final int wantedLocationId;
   final Function productCallback;
@@ -657,9 +669,9 @@ class _FloorLayoutState extends State<FloorLayout> {
 
       for (int i = 0; i < racks.length; i++) {
         if (racks[i].rack.contains(tapPosition)) {
-          List<ProductInfo> productListFiltered = widget.productList
+          List<Product> productListFiltered = widget.productList
             .where(
-              (ProductInfo product) => product.locationId == racks[i].id,
+              (Product product) => product.locationId == racks[i].id,
             )
             .toList();
 
@@ -756,14 +768,17 @@ class _FloorLayoutState extends State<FloorLayout> {
       })
       .toList();
 
-    return GestureDetector(
-      onTapDown: onTapDown,
-      onTapUp: onTapUp,
-      onTapCancel: onTapCancel,
-      // onLongPressDown: onLongPressDown,
-      child: CustomPaint(
-        painter: RackPainter(racks: racks, wantedLocationId: widget.wantedLocationId),
-        child: SizedBox.expand(), // Expands to fill the available space
+    return Padding(
+      padding: const EdgeInsets.all(8.0),
+      child: GestureDetector(
+        onTapDown: onTapDown,
+        onTapUp: onTapUp,
+        onTapCancel: onTapCancel,
+        // onLongPressDown: onLongPressDown,
+        child: CustomPaint(
+          painter: RackPainter(racks: racks, wantedLocationId: widget.wantedLocationId),
+          child: SizedBox.expand(), // Expands to fill the available space
+        ),
       ),
     );
   }
@@ -811,7 +826,7 @@ class FileNotifier extends ChangeNotifier {
 
 class RackProductList extends StatefulWidget {
   final int locationId;
-  final List<ProductInfo> productList;
+  final List<Product> productList;
   final Directory cacheDir;
   final Function productCallback;
 
@@ -929,7 +944,7 @@ class _RackProductListState extends State<RackProductList> {
       body: ListView.builder(
         itemCount: widget.productList.length,
         itemBuilder: (BuildContext context, int index) {
-          String productId = widget.productList[index].productId;
+          String productId = widget.productList[index].id;
           return ListTile(
             title: Text("${productId.substring(0, 7)} ${productId.substring(7, 10)}"),
             trailing: IconButton(
@@ -1002,6 +1017,24 @@ class _EditPageState extends State<EditPage> {
               );
             },
           ),
+          platform_widgets.PlatformTextButton(
+            child: Text(
+              "Username & Password",
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 20,
+              ),
+            ),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => CredentialPage(),
+                ),
+              );
+            },
+          ),
         ],
       ),
     );
@@ -1018,57 +1051,118 @@ class UpdateProductsPage extends StatefulWidget {
 }
 
 class _UpdateProductsPageState extends State<UpdateProductsPage> {
-  List<ProductInfo> newProductList = [];
+  List<Product> newProductList = [];
 
   @override
-  void initState() async {
-    // TODO: implement initState
+  void initState() {
     super.initState();
-    final fields = await readCsv("${widget.cacheDir.path}/new_products.csv");
-    newProductList = fields
-      .map((List product) {
-        int productId = product[0];
-        String zeros = "";
-        if (productId < 10) {
-          zeros = "0" * 9;
-        } else if (productId < 100) {
-          zeros = "0" * 8;
-        } else if (productId < 1_000) {
-          zeros = "0" * 7;
-        } else if (productId < 10_000) {
-          zeros = "0" * 6;
-        } else if (productId < 100_000) {
-          zeros = "0" * 5;
-        } else if (productId < 1_000_000) {
-          zeros = "0" * 4;
-        } else if (productId < 10_000_000) {
-          zeros = "0" * 3;
-        } else if (productId < 100_000_000) {
-          zeros = "0" * 2;
-        } else if (productId < 1_000_000_000) {
-          zeros = "0" * 1;
-        }
-        return ProductInfo(productId: "$zeros$productId", locationId: product[1]);
-      })
-      .toList();
+    readProductList("${widget.cacheDir.path}/new_products.csv").then((List<Product> productList) {
+      setState(() {
+        newProductList = productList;
+      });
+    });
+  }
+
+  Future<String> _getUpdatedProductList() async {
+    // This method assumes that the updated products are correct and products can only have one location
+    // This means previous locations, even if true, will be overwritten
+    List<Product> currentProductList = await readProductList(getProductListPath(widget.cacheDir));
+    print("Original length: ${currentProductList.length}");
+
+    Map<String, Product> currentProductMap = {for (Product product in currentProductList) product.id: product};
+    print("New products length: ${currentProductMap.length}");
+
+    for (Product product in newProductList) {
+      currentProductMap[product.id] = product; // Overwrite if exists, add if new
+    }
+    currentProductList = currentProductMap.values.toList()
+      ..sort((Product self, Product other) => self.locationId.compareTo(other.locationId));
+
+    // for (int i = 0; i < currentProductList.length; i++) {
+    //   if (currentProductMap.containsKey(currentProductList[i].id) &&
+    //       newProductList.any((Product product) => product.id == currentProductList[i].id)) {
+    //     currentProductList[i] = newProductList.firstWhere((Product product) => product.id == currentProductList[i].id);
+    //   }
+    // }
+    //
+    // currentProductList.addAll(newProductList.where((Product product) => !currentProductMap.containsKey(product.id)));
+    // print("New length: ${currentProductList.length}");
+
+    String newCsv = const csv.ListToCsvConverter().convert(
+      currentProductList.map((Product product) => product.toList()).toList(),
+      fieldDelimiter: ";",
+      eol: "\n",
+    );
+    print(newCsv.substring(0, 50));
+    return "product_id;location_id\n" + newCsv;
+  }
+
+  Future<void> _uploadNewProductsToPastebin() async {
+    String apiDevKey = await SecureCredentialStorage.getApiKey();
+    if (apiDevKey.length == 0) return;
+    String apiUserKey = await SecureCredentialStorage.getUserKey();
+    if (apiUserKey.length == 0) return;
+
+    String newCsvProductList = await _getUpdatedProductList();
+
+    // print(newCsvProductList);
+    // return;
+
+    final response = await http.post(
+      Uri.parse("https://pastebin.com/api/api_post.php"),
+      body: {
+        "api_dev_key": apiDevKey,
+        "api_option": "paste",
+        "api_paste_code": newCsvProductList,
+        "api_user_key": apiUserKey,
+        "api_paste_name": "products.csv",
+        "api_paste_private": "0",
+        "api_paste_expire_date": "N",
+        "api_folder_key": "HM-WILMA",
+      }
+    );
+
+    if (response.statusCode == 200) {
+      // TODO: delete old paste
+      return;
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    return ListView.builder(
-      itemCount: newProductList.length,
-      itemBuilder: (context, index) {
-        return ListTile(
-          // TODO: impl
-        );
-      },
+    return Scaffold(
+      appBar: AppBar(
+        title: Text("Product List"),
+        actions: [
+          platform_widgets.PlatformIconButton(
+            icon: const Icon(Icons.upload),
+            onPressed: () async {
+              await _uploadNewProductsToPastebin();
+            },
+          ),
+        ],
+      ),
+      body: ListView.builder(
+        itemCount: newProductList.length,
+        itemBuilder: (context, index) {
+          Product productInfo = newProductList[index];
+          return ListTile(
+            title: Text(
+              "${productInfo.id.substring(0, 7)} ${productInfo.id.substring(7, 10)}  |  ${productInfo.locationId}",
+            ),
+            // TODO: impl
+          );
+        },
+      ),
     );
   }
 }
 
-class SecureApiKeyStorage {
+class SecureCredentialStorage {
   static const _storage = secure_storage.FlutterSecureStorage();
   static const _apiKey = "pastebin_api_key";
+  static const _usernameKey = "pastebin_user_key";
+  static const _passwordKey = "pastebin_password_key";
 
   static Future<void> saveApiKey(String apiKey) async {
     await _storage.write(key: _apiKey, value: apiKey);
@@ -1076,6 +1170,48 @@ class SecureApiKeyStorage {
 
   static Future<String> getApiKey() async {
     return await _storage.read(key: _apiKey) ?? "";
+  }
+
+  static Future<void> savePassword(String password) async {
+    await _storage.write(key: _passwordKey, value: password);
+  }
+
+  static Future<String> getPassword() async {
+    return await _storage.read(key: _passwordKey) ?? "";
+  }
+
+  static Future<void> saveUsername(String username) async {
+    await _storage.write(key: _usernameKey, value: username);
+  }
+
+  static Future<String> getUsername() async {
+    return await _storage.read(key: _usernameKey) ?? "";
+  }
+
+  static Future<String> getUserKey() async {
+    String apiDevKey = await getApiKey();
+    if (apiDevKey.length == 0) return "";
+
+    String username = await getUsername();
+    if (username.length == 0) return "";
+
+    String password = await getPassword();
+    if (password.length == 0) return "";
+
+    final response = await http.post(
+      Uri.parse("https://pastebin.com/api/api_login.php"),
+      body: {
+        "api_dev_key": apiDevKey,
+        "api_user_name": username,
+        "api_user_password": password,
+      },
+    );
+
+    if (response.statusCode == 200 && response.body.isNotEmpty) {
+      return response.body;
+    } else {
+      return "";
+    }
   }
 }
 
@@ -1098,7 +1234,7 @@ class _ApiKeyPageState extends State<ApiKeyPage> {
   }
 
   Future<void> _loadApiKey() async {
-    String apiKey = await SecureApiKeyStorage.getApiKey();
+    String apiKey = await SecureCredentialStorage.getApiKey();
     setState(() {
       _savedApiKey = apiKey;
       _controller.text = apiKey;
@@ -1106,7 +1242,7 @@ class _ApiKeyPageState extends State<ApiKeyPage> {
   }
 
   Future<void> _saveApiKey() async {
-    await SecureApiKeyStorage.saveApiKey(_controller.text);
+    await SecureCredentialStorage.saveApiKey(_controller.text);
     setState(() {
       _savedApiKey = _controller.text;
     });
@@ -1154,7 +1290,143 @@ class _ApiKeyPageState extends State<ApiKeyPage> {
             SizedBox(height: 20),
             Text(
               _savedApiKey.length != 0 ? "API Key Saved Securely" : "No API Key Saved",
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class CredentialPage extends StatefulWidget {
+  const CredentialPage({super.key});
+
+  @override
+  State<CredentialPage> createState() => _CredentialPageState();
+}
+
+class _CredentialPageState extends State<CredentialPage> {
+  final TextEditingController _usernameController = TextEditingController();
+  final TextEditingController _passwordController = TextEditingController();
+  String _savedUsername = "";
+  String _savedPassword = "";
+  bool _isUsernameObscure = true;
+  bool _isPasswordObscure = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadUsername();
+    _loadPassword();
+  }
+
+  Future<void> _loadUsername() async {
+    String username = await SecureCredentialStorage.getUsername();
+    setState(() {
+      _savedUsername = username;
+      _usernameController.text = username;
+    });
+  }
+
+  Future<void> _saveUsername() async {
+    await SecureCredentialStorage.saveUsername(_usernameController.text);
+    setState(() {
+      _savedUsername = _usernameController.text;
+    });
+  }
+
+  Future<void> _loadPassword() async {
+    String password = await SecureCredentialStorage.getPassword();
+    setState(() {
+      _savedPassword = password;
+      _passwordController.text = password;
+    });
+  }
+
+  Future<void> _savePassword() async {
+    await SecureCredentialStorage.savePassword(_passwordController.text);
+    setState(() {
+      _savedPassword = _passwordController.text;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text("Pastebin Username And Password"),
+      ),
+      body: Padding(
+        padding: EdgeInsets.all(16.0),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            TextField(
+              obscureText: _isUsernameObscure, // Hides API key
+              controller: _usernameController,
+              decoration: InputDecoration(
+                  labelText: "Enter Pastebin Username",
+                  border: OutlineInputBorder(),
+                  suffixIcon: platform_widgets.PlatformIconButton(
+                    icon: Icon(_isUsernameObscure ? Icons.visibility : Icons.visibility_off),
+                    onPressed: () {
+                      setState(() {
+                        _isUsernameObscure = !_isUsernameObscure;
+                      });
+                    },
+                  )
+              ),
+            ),
+            SizedBox(height: 20),
+            TextField(
+              obscureText: _isPasswordObscure, // Hides API key
+              controller: _passwordController,
+              decoration: InputDecoration(
+                  labelText: "Enter Pastebin Password",
+                  border: OutlineInputBorder(),
+                  suffixIcon: platform_widgets.PlatformIconButton(
+                    icon: Icon(_isPasswordObscure ? Icons.visibility : Icons.visibility_off),
+                    onPressed: () {
+                      setState(() {
+                        _isPasswordObscure = !_isPasswordObscure;
+                      });
+                    },
+                  )
+              ),
+            ),
+            SizedBox(height: 20),
+            platform_widgets.PlatformElevatedButton(
+              onPressed: () {
+                _saveUsername();
+                _savePassword();
+              },
+              child: Text(
+                "Save Credentials",
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 20,
+                ),
+              ),
+            ),
+            SizedBox(height: 20),
+            Text(
+              _savedUsername.length != 0 ? "Username Saved Securely" : "No Username Saved",
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            Text(
+              _savedPassword.length != 0 ? "Password Saved Securely" : "No Password Saved",
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+              ),
             ),
           ],
         ),
