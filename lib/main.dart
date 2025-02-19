@@ -11,14 +11,14 @@ import "package:flutter/material.dart";
 import "package:flutter/services.dart";  // PlatformException
 
 import "package:csv/csv.dart" as csv;
-// import "package:flutter_barcode_scanner/flutter_barcode_scanner.dart" as barcode;
+import "package:camera/camera.dart" as camera;
 import "package:flutter_platform_widgets/flutter_platform_widgets.dart" as platform_widgets;
 import "package:flutter_secure_storage/flutter_secure_storage.dart" as secure_storage;
+import "package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart" as mlkit_text_recognition;
 import "package:http/http.dart" as http;
-import "package:mobile_scanner/mobile_scanner.dart" as scanner;
 import "package:path_provider/path_provider.dart" as path;
 import "package:permission_handler/permission_handler.dart" as permission;
-import "package:provider/provider.dart" as provider;
+// import "package:provider/provider.dart" as provider;
 
 const String locationListFilename = "locations.csv";
 const String productListFilename = "products.csv";
@@ -143,12 +143,9 @@ void main() async {
   }
 
   runApp(
-    provider.ChangeNotifierProvider(
-      create: (context) => FileNotifier(),
-      child: StoreLocateProduct(
-        cacheDir: appCacheDir,
-      ),
-    )
+    StoreLocateProduct(
+      cacheDir: appCacheDir,
+    ),
   );
 }
 
@@ -213,6 +210,31 @@ Future<List<Product>> readProductList(String path) async {
     .toList();
 }
 
+Future<List<camera.CameraController>> initializeCamera() async {
+  // Request camera permission before proceeding
+  var status = await permission.Permission.camera.request();
+  if (!status.isGranted) {
+    return [];  // Return empty list so later on a length check instead of a null check can be done
+  }
+
+  List<camera.CameraDescription> cameras = await camera.availableCameras();
+  if (cameras.isEmpty) {
+    return [];  // Return empty list so later on a length check instead of a null check can be done
+  }
+
+  camera.CameraController controller = camera.CameraController(
+    cameras[0],
+    camera.ResolutionPreset.medium,
+    enableAudio: false,
+  );
+  await controller.initialize();
+
+  // await controller.setExposureMode(camera.ExposureMode.locked);
+  // await controller.setFocusMode(camera.FocusMode.locked);
+
+  return [controller];
+}
+
 class StoreLocateProduct extends StatelessWidget {
   final Directory cacheDir;
 
@@ -257,15 +279,11 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   int wantedLocationId = -1;
   String scannedBarcodeResult = "";
 
-  scanner.Barcode? _barcode;
-
   @override
   void initState() {
     super.initState();
     _floors = TabController(length: 3, vsync: this);
   }
-
-  // TODO: Consider switching to dartframe https://pub.dev/packages/dartframe
 
   Future<List<Location>> _loadLocations() async {
     final fields = await readCsv(getLocationListPath(widget.cacheDir));
@@ -352,39 +370,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
   }
 
-  Future<void> _scanBarcode() async {
-    String barcodeScanResult = "";
-    try {
-      // barcodeScanResult = await barcode.FlutterBarcodeScanner.scanBarcode(
-      //   "ff6666",
-      //   "Cancel",
-      //   true,
-      //   barcode.ScanMode.BARCODE,
-      // );
-      if (kDebugMode) {
-        print(barcodeScanResult);
-      }
-    } on PlatformException {
-      barcodeScanResult = "";
-    }
-
-    if (!mounted) {
-      return;
-    }
-
-    setState(() {
-      scannedBarcodeResult = barcodeScanResult;
-    });
-  }
-
-  void _handleBarcode(scanner.BarcodeCapture barcodes) {
-    if (mounted) {
-      setState(() {
-        _barcode = barcodes.barcodes.firstOrNull;
-      });
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     Widget searchBar = SearchAnchor(
@@ -454,137 +439,276 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       .where((Location location) => location.floor == Floor.second)
       .toList();
 
-    return provider.Consumer<FileNotifier>(
-      builder: (context, fileNotifier, child) {
-        return Scaffold(
-          appBar: AppBar(
-            // TRY THIS: Try changing the color here to a specific color (to
-            // Colors.amber, perhaps?) and trigger a hot reload to see the AppBar
-            // change color while the other colors stay the same.
-            backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-            // Here we take the value from the MyHomePage object that was created by
-            // the App.build method, and use it to set our appbar title.
-            leading: platform_widgets.PlatformIconButton(
-              icon: const Icon(Icons.settings),
-              onPressed: () {
+    return Scaffold(
+      appBar: AppBar(
+        // TRY THIS: Try changing the color here to a specific color (to
+        // Colors.amber, perhaps?) and trigger a hot reload to see the AppBar
+        // change color while the other colors stay the same.
+        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
+        // Here we take the value from the MyHomePage object that was created by
+        // the App.build method, and use it to set our appbar title.
+        leading: platform_widgets.PlatformIconButton(
+          icon: const Icon(Icons.settings),
+          onPressed: () {
+            Navigator.push(
+              context,
+              platform_widgets.platformPageRoute(
+                context: context,
+                builder: (context) => SettingsPage(
+                  cacheDir: widget.cacheDir,
+                ),
+              ),
+            );
+          },
+        ),
+        actions: [
+          platform_widgets.PlatformIconButton(
+            icon: const Icon(Icons.sync),
+            onPressed: () async {
+              await _downloadAndReplace();
+              _loadLocations().then((List<Location> locations) {
+                setState(() {
+                  locationList = locations;
+                });
+              });
+              _loadProducts().then((List<Product> products) {
+                setState(() {
+                  productList = products;
+                });
+              });
+            },
+          ),
+          platform_widgets.PlatformIconButton(
+            icon: const Icon(Icons.camera_alt_outlined),
+            onPressed: () async {
+              List<camera.CameraController> cameraControllers = await initializeCamera();
+              if (cameraControllers.length == 1) {
+                camera.CameraController cameraController = cameraControllers[0];
                 Navigator.push(
                   context,
-                  platform_widgets.platformPageRoute(
-                    context: context,
-                    builder: (context) => EditPage(
-                      cacheDir: widget.cacheDir,
-                    ),
+                  MaterialPageRoute(
+                    builder: (context) => TextRecognitionView(cameraController: cameraController),
                   ),
                 );
-              },
+              }
+              // TODO: impl
+            },
+          ),
+          searchBar
+        ],
+        bottom: TabBar(
+          controller: _floors,
+          tabs: [
+            Tab(
+              icon: Image.asset("assets/number-zero-fill-svgrepo-com.png"),
             ),
-            actions: [
-              platform_widgets.PlatformIconButton(
-                icon: const Icon(Icons.sync),
-                onPressed: () async {
-                  await _downloadAndReplace();
-                  _loadLocations().then((List<Location> locations) {
-                    setState(() {
-                      locationList = locations;
-                    });
-                  });
-                  _loadProducts().then((List<Product> products) {
-                    setState(() {
-                      productList = products;
-                    });
-                  });
-                },
-              ),
-              platform_widgets.PlatformIconButton(
-                icon: const Icon(Icons.camera_alt_outlined),
-                onPressed: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => scanner.MobileScanner(
-                        onDetect: _handleBarcode,
+            Tab(
+              icon: Image.asset("assets/number-one-fill-svgrepo-com.png"),
+            ),
+            Tab(
+              icon: Image.asset("assets/number-two-fill-svgrepo-com.png"),
+            ),
+          ],
+        ),
+      ),
+      body: locationsLoaded ? TabBarView(
+        controller: _floors,
+        children: <Widget>[
+          FloorLayout(
+            key: ValueKey(wantedLocationId + 0),
+            floor: Floor.ground,
+            locationList: groundFloorLayoutList,
+            productList: productList,
+            cacheDir: widget.cacheDir,
+            wantedLocationId: wantedLocationId,
+            productCallback: _loadProducts,
+          ),
+          FloorLayout(
+            key: ValueKey(wantedLocationId + 1),
+            floor: Floor.first,
+            locationList: firstFloorLayoutList,
+            productList: productList,
+            cacheDir: widget.cacheDir,
+            wantedLocationId: wantedLocationId,
+            productCallback: _loadProducts,
+          ),
+          FloorLayout(
+            key: ValueKey(wantedLocationId + 2),
+            floor: Floor.second,
+            locationList: secondFloorLayoutList,
+            productList: productList,
+            cacheDir: widget.cacheDir,
+            wantedLocationId: wantedLocationId,
+            productCallback: _loadProducts,
+          ),
+        ],
+      ) : Text("Loading ..."),
+    );
+  }
+}
+
+class TextRecognitionView extends StatefulWidget {
+  final camera.CameraController cameraController;
+
+  const TextRecognitionView({required this.cameraController, Key? key}) : super(key: key);
+
+  @override
+  State<TextRecognitionView> createState() => _TextRecognitionViewState();
+}
+
+class _TextRecognitionViewState extends State<TextRecognitionView> {
+  bool isProcessing = false;
+  String recognizedText = "";
+
+  static const double captureButtonRelativeSize = 0.12;  // TODO: maybe adjust this value
+  bool isCaptureButtonVisible = true;
+
+  String _findProductId(mlkit_text_recognition.RecognizedText result) {
+    for(mlkit_text_recognition.TextBlock block in result.blocks) {
+      for (mlkit_text_recognition.TextLine line in block.lines) {
+        for (int i = 0; i < line.elements.length; ++i) {
+          mlkit_text_recognition.TextElement textElement = line.elements[i];
+          // Zeros can be recognized as the letters 'O' or 'o'
+          textElement.text.replaceAll("O", "0");
+          textElement.text.replaceAll("o", "0");
+          // Maybe we found the product id and the color code?
+          if (textElement.text.length == 3 && i > 1 && line.elements[i-1].text.length == 7) {
+            // Zeros can be recognized as the letters 'O' or 'o'
+            line.elements[i-1].text.replaceAll("O", "0");
+            line.elements[i-1].text.replaceAll("o", "0");
+            // Are they parse-able as integers meaning they only consist of integers
+            if (int.tryParse(textElement.text) != null && int.tryParse(line.elements[i-1].text) != null) {
+              return "${line.elements[i-1].text} ${textElement.text}";
+            }
+          }
+        }
+      }
+    }
+    return "";
+  }
+
+  Future<void> captureAndRecognizeText() async {
+    if (!widget.cameraController.value.isInitialized || isProcessing) return;
+
+    setState(() {
+      isProcessing = true;
+    });
+
+    try {
+      camera.XFile imageFile = await widget.cameraController.takePicture();
+      mlkit_text_recognition.InputImage inputImage = mlkit_text_recognition.InputImage.fromFilePath(imageFile.path);
+      mlkit_text_recognition.TextRecognizer textRecognizer = mlkit_text_recognition.TextRecognizer();
+      mlkit_text_recognition.RecognizedText result = await textRecognizer.processImage(inputImage);
+
+      String foundProductId = _findProductId(result);
+
+      setState(() {
+        recognizedText = foundProductId.isNotEmpty ? foundProductId : "No Product ID found";
+      });
+
+      textRecognizer.close();
+    } catch (e) {
+      setState(() {
+        recognizedText = "Error: $e";
+      });
+    }
+
+    setState(() {
+      isProcessing = false;
+    });
+  }
+
+  @override
+  void dispose() {
+    if (widget.cameraController.value.isInitialized) {
+      widget.cameraController.dispose();
+    }
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    double screenHeight = MediaQuery.of(context).size.height;
+    double captureButtonSize = screenHeight * captureButtonRelativeSize;
+    double innerCircleSize = captureButtonSize * 0.6;  // TODO: maybe adjust this value
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text("Product ID Recognition"),
+      ),
+      body: Column(
+        children: [
+          Expanded(
+            child: AspectRatio(
+              aspectRatio: widget.cameraController.value.aspectRatio,
+              child: camera.CameraPreview(widget.cameraController),
+            ),
+          ),
+
+          // TODO: switch this maybe to a floating button or a Stack so CameraView is the full screen
+          SizedBox(
+            height: captureButtonSize * 1.2, // TODO: switch this to 1.0
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    Icon(
+                      Icons.circle_outlined,
+                      size: captureButtonSize,
+                      color: Colors.white,
+                    ),
+
+                    GestureDetector(
+                      onTapDown: (_) {
+                        setState(() {
+                          // TODO: maybe adjust this value
+                          innerCircleSize = captureButtonSize * 0.5; // Shrink button on press
+                        });
+                      },
+                      onTapUp: (_) async {
+                        if (isProcessing) return;
+
+                        setState(() {
+                          // TODO: maybe adjust this value
+                          innerCircleSize = captureButtonSize * 0.6; // Restore original size
+                        });
+
+                        await Future.delayed(Duration(milliseconds: 100), () {
+                          setState(() {
+                            isCaptureButtonVisible = false; // Briefly hide button after capture
+                          });
+                        });
+
+                        await captureAndRecognizeText();
+                        // TODO: send this to new_products.csv
+
+                        await Future.delayed(Duration(milliseconds: 200), () {
+                          setState(() {
+                            isCaptureButtonVisible = true; // Show button again
+                          });
+                        });
+                      },
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 100),
+                        width: innerCircleSize,
+                        height: innerCircleSize,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: isCaptureButtonVisible ? Colors.white : Colors.transparent,
+                        ),
                       ),
                     ),
-                  );
-                  if (kDebugMode) {
-                    print(_barcode);
-                  }
-                  // TODO: impl
-                },
-                // onPressed: () => _scanBarcode(), // async {
-                  // if (Platform.isAndroid) {
-                  //   int androidVersion = int.parse(Platform.version.split(".")[0]);
-                  //   if (androidVersion < 10) {
-                  //     // Request permissions differently for Android 9 and below
-                  //     var status = await permission.Permission.camera.status;
-                  //     if (!status.isGranted) {
-                  //       await permission.Permission.camera.request();
-                  //     }
-                  //   }
-                  // }
-                  // permission.PermissionStatus status = await permission.Permission.camera.status;
-                  // if (kDebugMode) {
-                  //   print(status);
-                  // }
-                  // if (!status.isGranted) {
-                  //   await permission.Permission.camera.request();
-                  // }
-                  // if (status.isGranted) {
-                  //   await _scanBarcode();
-                  // }
-                // },
-              ),
-              searchBar
-            ],
-            bottom: TabBar(
-              controller: _floors,
-              tabs: [
-                Tab(
-                  icon: Image.asset("assets/number-zero-fill-svgrepo-com.png"),
+                  ]
                 ),
-                Tab(
-                  icon: Image.asset("assets/number-one-fill-svgrepo-com.png"),
-                ),
-                Tab(
-                  icon: Image.asset("assets/number-two-fill-svgrepo-com.png"),
-                ),
+                // TODO: delete Text() when debugging isn't necessary anymore
+                Text(recognizedText, textAlign: TextAlign.center),
               ],
             ),
           ),
-          body: locationsLoaded ? TabBarView(
-            controller: _floors,
-            children: <Widget>[
-              FloorLayout(
-                key: ValueKey(wantedLocationId + 0),
-                floor: Floor.ground,
-                locationList: groundFloorLayoutList,
-                productList: productList,
-                cacheDir: widget.cacheDir,
-                wantedLocationId: wantedLocationId,
-                productCallback: _loadProducts,
-              ),
-              FloorLayout(
-                key: ValueKey(wantedLocationId + 1),
-                floor: Floor.first,
-                locationList: firstFloorLayoutList,
-                productList: productList,
-                cacheDir: widget.cacheDir,
-                wantedLocationId: wantedLocationId,
-                productCallback: _loadProducts,
-              ),
-              FloorLayout(
-                key: ValueKey(wantedLocationId + 2),
-                floor: Floor.second,
-                locationList: secondFloorLayoutList,
-                productList: productList,
-                cacheDir: widget.cacheDir,
-                wantedLocationId: wantedLocationId,
-                productCallback: _loadProducts,
-              ),
-            ],
-          ) : Text("Loading ..."),
-        );
-      },
+        ],
+      ),
     );
   }
 }
@@ -896,7 +1020,20 @@ class _RackProductListState extends State<RackProductList> {
         actions: [
           platform_widgets.PlatformIconButton(
             icon: const Icon(Icons.camera_alt_outlined),
-            onPressed: () {
+            onPressed: () async {
+              List<camera.CameraController> _cameraControllers = await initializeCamera();
+              if (_cameraControllers.length > 0) {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) {
+                      return TextRecognitionView(
+                        cameraController: _cameraControllers[0],
+                      );
+                    },
+                  ),
+                );
+              }
               // TODO: impl
             },
           ),
@@ -953,16 +1090,16 @@ class _RackProductListState extends State<RackProductList> {
   }
 }
 
-class EditPage extends StatefulWidget {
+class SettingsPage extends StatefulWidget {
   final Directory cacheDir;
 
-  const EditPage({super.key, required this.cacheDir});
+  const SettingsPage({super.key, required this.cacheDir});
 
   @override
-  State<EditPage> createState() => _EditPageState();
+  State<SettingsPage> createState() => _SettingsPageState();
 }
 
-class _EditPageState extends State<EditPage> {
+class _SettingsPageState extends State<SettingsPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
