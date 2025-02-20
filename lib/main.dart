@@ -10,8 +10,8 @@ import "package:flutter/gestures.dart";
 import "package:flutter/material.dart";
 import "package:flutter/services.dart";  // PlatformException
 
-import "package:csv/csv.dart" as csv;
 import "package:camera/camera.dart" as camera;
+import "package:csv/csv.dart" as csv;
 import "package:flutter_platform_widgets/flutter_platform_widgets.dart" as platform_widgets;
 import "package:flutter_secure_storage/flutter_secure_storage.dart" as secure_storage;
 import "package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart" as mlkit_text_recognition;
@@ -28,7 +28,7 @@ const String productListFilename = "products.csv";
 class StoreDimensions {
   // Notice that it says groundFloor and continuing, because the first floor corresponds to floor 1
   // american vs german floor counting
-  static const int groundFloorWidth = 1700;  // cm (pointing south)
+  static const int groundFloorWidth = 1800;  // cm (pointing south)
   static const int groundFloorHeight = 4200;  // cm (pointing west)
   static const int firstFloorWidth = 3100;  // cm (pointing east)
   static const int firstFloorHeight = 4500;  // cm (pointing south)
@@ -62,16 +62,7 @@ class Location {
   });
 
   List<int> toList() {
-    int floorNumber;
-    switch (this.floor) {
-      case Floor.ground:
-        floorNumber = 0;
-      case Floor.first:
-        floorNumber = 1;
-      case Floor.second:
-        floorNumber = 2;
-    }
-    return [id, floorNumber, x0, y0, a, b];
+    return [id, floorToInt(floor), x0, y0, a, b];
   }
 
   @override
@@ -169,6 +160,17 @@ String getLocationListPath(Directory cacheDir) {
 
 String getProductListPath(Directory cacheDir) {
   return "${cacheDir.path}/$productListFilename";
+}
+
+int floorToInt(Floor floor) {
+  switch (floor) {
+    case Floor.ground:
+      return 0;
+    case Floor.first:
+      return 1;
+    case Floor.second:
+      return 2;
+  }
 }
 
 Future<List<List<dynamic>>> readCsv(String path) async {
@@ -336,8 +338,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   Future<void> _downloadAndReplace() async {
-    final locationsCsvUrl = "https://pastebin.com/raw/MMruJhV9";
-    final productsPointerCsvUrl = "https://pastebin.com/raw/uZ4MzZdT";
+    final String locationsCsvUrl = "https://pastebin.com/raw/MMruJhV9";
+    final String productsPointerCsvUrl = "https://pastebin.com/raw/uZ4MzZdT";
 
     try {
       final response = await http.get(Uri.parse(locationsCsvUrl));
@@ -387,16 +389,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       viewOnSubmitted: (String productId) {
         Navigator.of(context).maybePop();
         var (_wantedLocationId, floor) = _locateProduct(productId);
-        int floorNumber = 0;
-        switch (floor) {
-          case Floor.ground:
-            floorNumber = 0;
-          case Floor.first:
-            floorNumber = 1;
-          case Floor.second:
-            floorNumber = 2;
-        }
-        _floors.animateTo(floorNumber);
+        _floors.animateTo(floorToInt(floor));
         setState(() {
           wantedLocationId = _wantedLocationId;
         });
@@ -484,12 +477,19 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
               List<camera.CameraController> cameraControllers = await initializeCamera();
               if (cameraControllers.length == 1) {
                 camera.CameraController cameraController = cameraControllers[0];
-                Navigator.push(
+                String productId = await Navigator.push(
                   context,
                   MaterialPageRoute(
                     builder: (context) => TextRecognitionView(cameraController: cameraController),
                   ),
                 );
+                print("Found Product ID: ${productId}");
+                var (_wantedLocationId, floor) = _locateProduct(productId);
+                _floors.animateTo(floorToInt(floor));
+                setState(() {
+                  wantedLocationId = _wantedLocationId;
+                });
+
               }
               // TODO: impl
             },
@@ -559,6 +559,7 @@ class TextRecognitionView extends StatefulWidget {
 class _TextRecognitionViewState extends State<TextRecognitionView> {
   bool isProcessing = false;
   String recognizedText = "";
+  bool isProductIdSuccessful = false;
 
   static const double captureButtonRelativeSize = 0.12;  // TODO: maybe adjust this value
   bool isCaptureButtonVisible = true;
@@ -604,6 +605,9 @@ class _TextRecognitionViewState extends State<TextRecognitionView> {
 
       setState(() {
         recognizedText = foundProductId.isNotEmpty ? foundProductId : "No Product ID found";
+        if (foundProductId.isNotEmpty) {
+          isProductIdSuccessful = true;
+        }
       });
 
       textRecognizer.close();
@@ -616,6 +620,27 @@ class _TextRecognitionViewState extends State<TextRecognitionView> {
     setState(() {
       isProcessing = false;
     });
+  }
+
+  Future<void> failDialog() async {
+    return await showDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      builder: (BuildContext dialogContext) {
+        return AlertDialog(
+          title: const Text('No Product ID was found'),
+          content: const Text("No Product ID was recognized. You may try again"),
+          actions: <Widget>[
+            platform_widgets.PlatformTextButton(
+              child: const Text("Return to camera"),
+              onPressed: () {
+                Navigator.of(dialogContext).pop();
+              },
+            ),
+          ],
+        );
+      },
+    );
   }
 
   @override
@@ -689,6 +714,37 @@ class _TextRecognitionViewState extends State<TextRecognitionView> {
                             isCaptureButtonVisible = true; // Show button again
                           });
                         });
+
+                        if (isProductIdSuccessful) {
+                          await showDialog<void>(
+                            context: context,
+                            barrierDismissible: true,
+                            builder: (BuildContext dialogContext) {
+                              return AlertDialog(
+                                title: const Text("Product ID found"),
+                                content: Text("Is $recognizedText correct?"),
+                                actions: <Widget>[
+                                  platform_widgets.PlatformTextButton(
+                                    child: Text("Cancel"),
+                                    onPressed: () {
+                                      Navigator.of(dialogContext).pop();
+                                    },
+                                  ),
+                                  platform_widgets.PlatformTextButton(
+                                    child: Text("Submit"),
+                                    onPressed: () {
+                                      Navigator.of(dialogContext).pop();
+                                      Navigator.of(context).pop(recognizedText);
+                                    },
+                                  ),
+                                ],
+                              );
+                            },
+                          );
+                        } else {
+                          await failDialog();
+                        }
+                        // Navigator.pop(context, recognizedText);
                       },
                       child: AnimatedContainer(
                         duration: const Duration(milliseconds: 100),
@@ -1023,7 +1079,7 @@ class _RackProductListState extends State<RackProductList> {
             onPressed: () async {
               List<camera.CameraController> _cameraControllers = await initializeCamera();
               if (_cameraControllers.length > 0) {
-                Navigator.push(
+                String productId = await Navigator.push(
                   context,
                   MaterialPageRoute(
                     builder: (context) {
