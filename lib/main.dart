@@ -116,17 +116,19 @@ void main() async {
   appCacheDir.createSync(recursive: true);
   print("Cache directory found");
   print("cache: $appCacheDir");
+  Directory csvDbDir = Directory("${appCacheDir.path}${Platform.pathSeparator}csv_db");
+  csvDbDir.createSync(recursive: true);
 
   // x0 and a are orthogonal to the entrance and y0 and b are parallel
   // In location.csv y0, y0, a and b are given in centimeters
-  File locationListFile = File(getLocationListPath(appCacheDir));
+  File locationListFile = File(getLocationListPath(csvDbDir));
   if (!locationListFile.existsSync() || true) {  // TODO: Remember to delete || true
     print("Location list file created");
     locationListFile.createSync(recursive: true, exclusive: false);  // TODO: Remember to change exclusive: true
     locationListFile.writeAsStringSync("id;floor;x0;y0;a;b");
   }
 
-  File productListFile = File(getProductListPath(appCacheDir));
+  File productListFile = File(getProductListPath(csvDbDir));
   if (!productListFile.existsSync() || true) {  // TODO: Remember to delete || true
     print("Product list file created");
     productListFile.createSync(recursive: true, exclusive: false);  // TODO: Remember to change exclusive: true
@@ -135,7 +137,7 @@ void main() async {
 
   runApp(
     StoreLocateProduct(
-      cacheDir: appCacheDir,
+      cacheDir: csvDbDir,
     ),
   );
 }
@@ -177,7 +179,7 @@ Future<List<List<dynamic>>> readCsv(String path) async {
   final stream = File(path).openRead();
   return await stream
     .transform(utf8.decoder)
-    .transform(csv.CsvToListConverter(fieldDelimiter: ";", eol: "\n"))
+    .transform(csv.CsvToListConverter(fieldDelimiter: ";", eol: Platform.lineTerminator))
     .skip(1)
     .toList();
 }
@@ -318,7 +320,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     return await readProductList(getProductListPath(widget.cacheDir));
   }
 
-  (int, Floor) _locateProduct(String productId) {
+  Floor _locateProduct(String productId) {
+    // TODO: Make _locateProduct into a possible void function
     int locationId = -1;
     for (Product product in productList) {
       if (product.id == productId) {
@@ -327,14 +330,17 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       }
     }
     Floor productFloor = Floor.ground;
-    if (locationId == -1) return (locationId, productFloor);  // early return, because product couldn't be found
+    if (locationId == -1) return productFloor;  // early return, because product id couldn't be found
     for (Location location in locationList) {
       if (location.id == locationId) {
         productFloor = location.floor;
         break;
       }
     }
-    return (locationId, productFloor);
+    setState(() {
+      wantedLocationId = locationId;
+    });
+    return productFloor;
   }
 
   Future<void> _downloadAndReplace() async {
@@ -388,11 +394,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       },
       viewOnSubmitted: (String productId) {
         Navigator.of(context).maybePop();
-        var (_wantedLocationId, floor) = _locateProduct(productId);
+        Floor floor = _locateProduct(productId);
         _floors.animateTo(floorToInt(floor));
-        setState(() {
-          wantedLocationId = _wantedLocationId;
-        });
       },
     );
 
@@ -483,13 +486,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                     builder: (context) => TextRecognitionView(cameraController: cameraController),
                   ),
                 );
-                print("Found Product ID: ${productId}");
-                var (_wantedLocationId, floor) = _locateProduct(productId);
+                Floor floor = _locateProduct(productId);
                 _floors.animateTo(floorToInt(floor));
-                setState(() {
-                  wantedLocationId = _wantedLocationId;
-                });
-
               }
               // TODO: impl
             },
@@ -521,7 +519,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             productList: productList,
             cacheDir: widget.cacheDir,
             wantedLocationId: wantedLocationId,
-            productCallback: _loadProducts,
           ),
           FloorLayout(
             key: ValueKey(wantedLocationId + 1),
@@ -530,7 +527,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             productList: productList,
             cacheDir: widget.cacheDir,
             wantedLocationId: wantedLocationId,
-            productCallback: _loadProducts,
           ),
           FloorLayout(
             key: ValueKey(wantedLocationId + 2),
@@ -539,7 +535,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             productList: productList,
             cacheDir: widget.cacheDir,
             wantedLocationId: wantedLocationId,
-            productCallback: _loadProducts,
           ),
         ],
       ) : Text("Loading ..."),
@@ -579,7 +574,7 @@ class _TextRecognitionViewState extends State<TextRecognitionView> {
             line.elements[i-1].text.replaceAll("o", "0");
             // Are they parse-able as integers meaning they only consist of integers
             if (int.tryParse(textElement.text) != null && int.tryParse(line.elements[i-1].text) != null) {
-              return "${line.elements[i-1].text} ${textElement.text}";
+              return "${line.elements[i-1].text}${textElement.text}";
             }
           }
         }
@@ -722,7 +717,9 @@ class _TextRecognitionViewState extends State<TextRecognitionView> {
                             builder: (BuildContext dialogContext) {
                               return AlertDialog(
                                 title: const Text("Product ID found"),
-                                content: Text("Is $recognizedText correct?"),
+                                content: Text(
+                                  "Is ${recognizedText.substring(0, 7)} ${recognizedText.substring(7, 10)} correct?",
+                                ),
                                 actions: <Widget>[
                                   platform_widgets.PlatformTextButton(
                                     child: Text("Cancel"),
@@ -775,7 +772,6 @@ class FloorLayout extends StatefulWidget {
   final List<Product> productList;
   final Directory cacheDir;
   final int wantedLocationId;
-  final Function productCallback;
 
   const FloorLayout({
     super.key,
@@ -784,7 +780,6 @@ class FloorLayout extends StatefulWidget {
     required this.productList,
     required this.cacheDir,
     required this.wantedLocationId,
-    required this.productCallback,
   });
 
   @override
@@ -855,7 +850,6 @@ class _FloorLayoutState extends State<FloorLayout> {
                 locationId: racks[i].id,
                 productList: productListFiltered,
                 cacheDir: widget.cacheDir,
-                productCallback: widget.productCallback,
               ),
             ),
           );
@@ -986,29 +980,16 @@ class RackPainter extends CustomPainter {
   bool shouldRepaint(CustomPainter oldDelegate) => false;
 }
 
-class FileNotifier extends ChangeNotifier {
-  String _content = '';
-
-  String get content => _content;
-
-  void updateContent(String newContent) {
-    _content = newContent;
-    notifyListeners();
-  }
-}
-
 class RackProductList extends StatefulWidget {
   final int locationId;
   final List<Product> productList;
   final Directory cacheDir;
-  final Function productCallback;
 
   const RackProductList({
     super.key,
     required this.locationId,
     required this.productList,
     required this.cacheDir,
-    required this.productCallback
   });
 
   @override
@@ -1054,7 +1035,7 @@ class _RackProductListState extends State<RackProductList> {
       newProductFile.createSync(exclusive: false);
       newProductFile.writeAsStringSync("product_id;location_id");
     }
-    newProductFile.writeAsStringSync("\n$productId;${widget.locationId}", mode: FileMode.append);
+    newProductFile.writeAsStringSync("${Platform.lineTerminator}$productId;${widget.locationId}", mode: FileMode.append);
   }
 
   bool _validateProductId(String productId) {
@@ -1066,6 +1047,36 @@ class _RackProductListState extends State<RackProductList> {
       }
     }
     return productId.length == 10 && digitsOnly;
+  }
+
+  Future<void> updateProductListOfLocation(String productId) async {
+    List<Product> currentProducts = await readProductList(
+      "${widget.cacheDir.path}${Platform.pathSeparator}$productListFilename",
+    );
+    print("we got here 0");
+    bool found = false;
+    for (Product product in currentProducts) {
+      if(product.id == productId) {
+        currentProducts.remove(product);
+        found = true;
+        break;
+      }
+    }
+    if (found) {
+      print("we got here 1");
+      File productsFile = File("${widget.cacheDir.path}${Platform.pathSeparator}$productListFilename");
+      if (productsFile.existsSync()) {
+        print("we got here 2");
+        String newCsv = const csv.ListToCsvConverter().convert(
+          currentProducts.map((Product product) => product.toList()).toList(),
+          fieldDelimiter: ";",
+          eol: Platform.lineTerminator,
+        );
+        print("we got here 3");
+        productsFile.writeAsStringSync("product_id;location_id${Platform.lineTerminator}$newCsv");
+        print("we got here 4");
+      }
+    }
   }
 
   @override
@@ -1089,6 +1100,7 @@ class _RackProductListState extends State<RackProductList> {
                     },
                   ),
                 );
+                _addToNewProductList(productId);
               }
               // TODO: impl
             },
@@ -1135,8 +1147,10 @@ class _RackProductListState extends State<RackProductList> {
             title: Text("${productId.substring(0, 7)} ${productId.substring(7, 10)}"),
             trailing: platform_widgets.PlatformIconButton(
               icon: const Icon(Icons.delete),
-              onPressed: () {
-                // TODO: impl
+              onPressed: () async {
+                // await updateProductListOfLocation(productId);
+                // TODO: impl (Deleting a product from a rack shouldn't update the products.csv. new_products.csv should
+                // TODO: update and there should be a value indicating that, this product doesn't exist anymore)
               },
             ),
           );
@@ -1249,7 +1263,7 @@ class _UpdateProductsPageState extends State<UpdateProductsPage> {
     });
   }
 
-  Future<String> _getUpdatedProductList() async {
+  Future<List<Product>> mergeUpdatedProductLists() async {
     // This method assumes that the updated products are correct and products can only have one location
     // This means previous locations, even if true, will be overwritten
     List<Product> currentProductList = await readProductList(getProductListPath(widget.cacheDir));
@@ -1260,57 +1274,68 @@ class _UpdateProductsPageState extends State<UpdateProductsPage> {
 
     for (Product product in newProductList) {
       currentProductMap[product.id] = product; // Overwrite if exists, add if new
+      // TODO: If value indicates product doesn't exist anymore, don't add or overwrite it, just delete it
     }
     currentProductList = currentProductMap.values.toList()
       ..sort((Product self, Product other) => self.locationId.compareTo(other.locationId));
-
-    // for (int i = 0; i < currentProductList.length; i++) {
-    //   if (currentProductMap.containsKey(currentProductList[i].id) &&
-    //       newProductList.any((Product product) => product.id == currentProductList[i].id)) {
-    //     currentProductList[i] = newProductList.firstWhere((Product product) => product.id == currentProductList[i].id);
-    //   }
-    // }
-    //
-    // currentProductList.addAll(newProductList.where((Product product) => !currentProductMap.containsKey(product.id)));
-    // print("New length: ${currentProductList.length}");
-
-    String newCsv = const csv.ListToCsvConverter().convert(
-      currentProductList.map((Product product) => product.toList()).toList(),
-      fieldDelimiter: ";",
-      eol: "\n",
-    );
-    print(newCsv.substring(0, 50));
-    return "product_id;location_id\n" + newCsv;
+    return currentProductList;
   }
 
-  Future<void> _uploadNewProductsToPastebin() async {
+  String productListToCsv(List<Product> products) {
+    String newCsv = const csv.ListToCsvConverter().convert(
+      products.map((Product product) => product.toList()).toList(),
+      fieldDelimiter: ";",
+      eol: Platform.lineTerminator,
+    );
+    return "product_id;location_id${Platform.lineTerminator}$newCsv";
+  }
+
+  Future<void> uploadNewProductsToPastebin() async {
     String apiDevKey = await SecureCredentialStorage.getApiKey();
     if (apiDevKey.length == 0) return;
     String apiUserKey = await SecureCredentialStorage.getUserKey();
     if (apiUserKey.length == 0) return;
 
-    String newCsvProductList = await _getUpdatedProductList();
+    List<Product> mergedProductList = await mergeUpdatedProductLists();
+    String newCsvProductList = productListToCsv(mergedProductList);
 
-    // print(newCsvProductList);
-    // return;
+    try {
+      final response = await http.post(
+        Uri.parse("https://pastebin.com/api/api_post.php"),
+        body: {
+          "api_dev_key": apiDevKey,
+          "api_option": "paste",
+          "api_paste_code": newCsvProductList,
+          "api_user_key": apiUserKey,
+          "api_paste_name": "products.csv",
+          "api_paste_private": "0",
+          "api_paste_expire_date": "N",
+          "api_folder_key": "HM-WILMA",
+        }
+      );
+      // If successful, new_products.csv gets a reset and old paste gets deleted
+      if (response.statusCode == 200) {
+        File newProductCsvFile = File("${widget.cacheDir.path}/new_products.csv");
+        if (newProductCsvFile.existsSync()) {
+          newProductCsvFile.writeAsStringSync("product_id;location_id${Platform.lineTerminator}");
+        }
 
-    final response = await http.post(
-      Uri.parse("https://pastebin.com/api/api_post.php"),
-      body: {
-        "api_dev_key": apiDevKey,
-        "api_option": "paste",
-        "api_paste_code": newCsvProductList,
-        "api_user_key": apiUserKey,
-        "api_paste_name": "products.csv",
-        "api_paste_private": "0",
-        "api_paste_expire_date": "N",
-        "api_folder_key": "HM-WILMA",
+        // TODO: delete old paste
+        return;
       }
-    );
+    } catch (e) {
+      print("Exception during upload occurred: $e");
+    }
+  }
 
-    if (response.statusCode == 200) {
-      // TODO: delete old paste
-      return;
+  void updateNewProductsCsvFile(Product product) {
+    setState(() {
+      newProductList.remove(product);
+    });
+    String newCsv = productListToCsv(newProductList);
+    File newProductCsvFile = File("${widget.cacheDir.path}/new_products.csv");
+    if (newProductCsvFile.existsSync()) {
+      newProductCsvFile.writeAsStringSync(newCsv);
     }
   }
 
@@ -1323,7 +1348,7 @@ class _UpdateProductsPageState extends State<UpdateProductsPage> {
           platform_widgets.PlatformIconButton(
             icon: const Icon(Icons.upload),
             onPressed: () async {
-              await _uploadNewProductsToPastebin();
+              await uploadNewProductsToPastebin();
             },
           ),
         ],
@@ -1331,12 +1356,18 @@ class _UpdateProductsPageState extends State<UpdateProductsPage> {
       body: ListView.builder(
         itemCount: newProductList.length,
         itemBuilder: (context, index) {
-          Product productInfo = newProductList[index];
+          Product product = newProductList[index];
           return ListTile(
             title: Text(
-              "${productInfo.id.substring(0, 7)} ${productInfo.id.substring(7, 10)}  |  ${productInfo.locationId}",
+              "${product.id.substring(0, 7)} ${product.id.substring(7, 10)}  |  ${product.locationId}",
             ),
-            // TODO: impl
+            trailing: platform_widgets.PlatformIconButton(
+              icon: const Icon(Icons.delete),
+              onPressed: () {
+                updateNewProductsCsvFile(product);
+                // TODO: impl
+              },
+            ),
           );
         },
       ),
