@@ -281,7 +281,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   List<Location> locationList = [];
   List<Product> productList = [];
   int wantedLocationId = -1;
-  String scannedBarcodeResult = "";
 
   @override
   void initState() {
@@ -667,7 +666,7 @@ class _TextRecognitionViewState extends State<TextRecognitionView> {
 
           // TODO: switch this maybe to a floating button or a Stack so CameraView is the full screen
           SizedBox(
-            height: captureButtonSize * 1.2, // TODO: switch this to 1.0
+            height: captureButtonSize * 1.0, // TODO: switch this to 1.0
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
@@ -756,7 +755,7 @@ class _TextRecognitionViewState extends State<TextRecognitionView> {
                   ]
                 ),
                 // TODO: delete Text() when debugging isn't necessary anymore
-                Text(recognizedText, textAlign: TextAlign.center),
+                // Text(recognizedText, textAlign: TextAlign.center),
               ],
             ),
           ),
@@ -863,43 +862,6 @@ class _FloorLayoutState extends State<FloorLayout> {
     _longPressTimer?.cancel();
   }
 
-  // void onLongPressDown(LongPressDownDetails details) {
-  //   Offset longTapPosition = details.localPosition;
-  //
-  //   _longPressTimer = Timer(Duration(milliseconds: 1000), () {
-  //     for (int i = 0; i < racks.length; i++) {
-  //       if(racks[i].rack.contains(longTapPosition)) {
-  //         showDialog<void>(
-  //           context: context,
-  //           barrierDismissible: true,
-  //           builder: (BuildContext dialogContext) {
-  //             return AlertDialog(
-  //               title: const Text("Deleting location"),
-  //               content: const Text("Do you want to delete this location?"),
-  //               actions: <Widget>[
-  //                 TextButton(
-  //                   child: const Text("Cancel"),
-  //                   onPressed: () {
-  //                     Navigator.of(dialogContext).pop();
-  //                   },
-  //                 ),
-  //                 TextButton(
-  //                   child: const Text("Delete"),
-  //                   onPressed: () {
-  //                     // TODO: impl
-  //                     Navigator.of(dialogContext).pop();
-  //                   },
-  //                 ),
-  //               ],
-  //             );
-  //           },
-  //         );
-  //       }
-  //     }
-  //   });
-  //   return;
-  // }
-
   @override
   Widget build(BuildContext context) {
     racks = widget.locationList
@@ -941,7 +903,6 @@ class _FloorLayoutState extends State<FloorLayout> {
         onTapDown: onTapDown,
         onTapUp: onTapUp,
         onTapCancel: onTapCancel,
-        // onLongPressDown: onLongPressDown,
         child: CustomPaint(
           painter: RackPainter(racks: racks, wantedLocationId: widget.wantedLocationId),
           child: SizedBox.expand(), // Expands to fill the available space
@@ -1030,12 +991,15 @@ class _RackProductListState extends State<RackProductList> {
   }
 
   void _addToNewProductList(String productId) {
-    File newProductFile = File("${widget.cacheDir.path}/new_products.csv");
+    File newProductFile = File("${widget.cacheDir.path}${Platform.pathSeparator}new_products.csv");
     if (!newProductFile.existsSync()) {
       newProductFile.createSync(exclusive: false);
       newProductFile.writeAsStringSync("product_id;location_id");
     }
-    newProductFile.writeAsStringSync("${Platform.lineTerminator}$productId;${widget.locationId}", mode: FileMode.append);
+    newProductFile.writeAsStringSync(
+      "${Platform.lineTerminator}$productId;${widget.locationId}",
+      mode: FileMode.append,
+    );
   }
 
   bool _validateProductId(String productId) {
@@ -1049,33 +1013,22 @@ class _RackProductListState extends State<RackProductList> {
     return productId.length == 10 && digitsOnly;
   }
 
-  Future<void> updateProductListOfLocation(String productId) async {
-    List<Product> currentProducts = await readProductList(
-      "${widget.cacheDir.path}${Platform.pathSeparator}$productListFilename",
+  Future<void> deleteLocationIdFromProduct(String productId) async {
+    List<Product> newProducts = await readProductList(
+      "${widget.cacheDir.path}${Platform.pathSeparator}new_products.csv",
     );
-    print("we got here 0");
-    bool found = false;
-    for (Product product in currentProducts) {
-      if(product.id == productId) {
-        currentProducts.remove(product);
-        found = true;
-        break;
-      }
-    }
-    if (found) {
-      print("we got here 1");
-      File productsFile = File("${widget.cacheDir.path}${Platform.pathSeparator}$productListFilename");
-      if (productsFile.existsSync()) {
-        print("we got here 2");
-        String newCsv = const csv.ListToCsvConverter().convert(
-          currentProducts.map((Product product) => product.toList()).toList(),
-          fieldDelimiter: ";",
-          eol: Platform.lineTerminator,
-        );
-        print("we got here 3");
-        productsFile.writeAsStringSync("product_id;location_id${Platform.lineTerminator}$newCsv");
-        print("we got here 4");
-      }
+    Map<String, Product> newProductsMap = {for (Product product in newProducts) product.id: product};
+    newProductsMap[productId] = Product(id: productId, locationId: -1);
+    newProducts = newProductsMap.values.toList();
+
+    File productsFile = File("${widget.cacheDir.path}${Platform.pathSeparator}new_products.csv");
+    if (productsFile.existsSync()) {
+      String newCsv = const csv.ListToCsvConverter().convert(
+        newProducts.map((Product product) => product.toList()).toList(),
+        fieldDelimiter: ";",
+        eol: Platform.lineTerminator,
+      );
+      productsFile.writeAsStringSync("product_id;location_id${Platform.lineTerminator}$newCsv");
     }
   }
 
@@ -1148,9 +1101,7 @@ class _RackProductListState extends State<RackProductList> {
             trailing: platform_widgets.PlatformIconButton(
               icon: const Icon(Icons.delete),
               onPressed: () async {
-                // await updateProductListOfLocation(productId);
-                // TODO: impl (Deleting a product from a rack shouldn't update the products.csv. new_products.csv should
-                // TODO: update and there should be a value indicating that, this product doesn't exist anymore)
+                await deleteLocationIdFromProduct(productId);
               },
             ),
           );
@@ -1273,8 +1224,12 @@ class _UpdateProductsPageState extends State<UpdateProductsPage> {
     print("New products length: ${currentProductMap.length}");
 
     for (Product product in newProductList) {
-      currentProductMap[product.id] = product; // Overwrite if exists, add if new
-      // TODO: If value indicates product doesn't exist anymore, don't add or overwrite it, just delete it
+      // -1 indicates that the product id should be deleted entirely (possible that product is out of stock)
+      if (product.locationId == -1) {
+        currentProductMap.remove(product.id);
+      } else {
+        currentProductMap[product.id] = product;  // Overwrite if exists, add if new
+      }
     }
     currentProductList = currentProductMap.values.toList()
       ..sort((Product self, Product other) => self.locationId.compareTo(other.locationId));
@@ -1287,6 +1242,9 @@ class _UpdateProductsPageState extends State<UpdateProductsPage> {
       fieldDelimiter: ";",
       eol: Platform.lineTerminator,
     );
+    if (newCsv.isEmpty) {  // If there are no products left, a line terminator leads to a broken .csv file
+      return "product_id;location_id";
+    }
     return "product_id;location_id${Platform.lineTerminator}$newCsv";
   }
 
@@ -1310,16 +1268,31 @@ class _UpdateProductsPageState extends State<UpdateProductsPage> {
           "api_paste_name": "products.csv",
           "api_paste_private": "0",
           "api_paste_expire_date": "N",
-          "api_folder_key": "HM-WILMA",
+          "api_folder_key": "TfNyVR2E",
         }
       );
       // If successful, new_products.csv gets a reset and old paste gets deleted
       if (response.statusCode == 200) {
-        File newProductCsvFile = File("${widget.cacheDir.path}/new_products.csv");
-        if (newProductCsvFile.existsSync()) {
-          newProductCsvFile.writeAsStringSync("product_id;location_id${Platform.lineTerminator}");
+        File newProductCsvFile = File("${widget.cacheDir.path}${Platform.pathSeparator}new_products.csv");
+        if (!newProductCsvFile.existsSync()) {
+          newProductCsvFile.createSync(recursive: true);
         }
-
+        newProductCsvFile.writeAsStringSync("product_id;location_id");
+        final responsePointer = await http.get(Uri.parse("https://pastebin.com/raw/uZ4MzZdT"));
+        if (responsePointer.statusCode == 200) {
+          final deleteResponse = await http.post(
+            Uri.parse("https://pastebin.com/api/api_login.php"),
+            body: {
+              "api_dev_key": apiDevKey,
+              "api_user_key": apiUserKey,
+              "api_paste_key": responsePointer.body,
+              "api_option": "delete",
+            },
+          );
+          if (deleteResponse.statusCode == 200) {
+            print("Old paste successfully deleted");
+          }
+        }
         // TODO: delete old paste
         return;
       }
@@ -1333,10 +1306,11 @@ class _UpdateProductsPageState extends State<UpdateProductsPage> {
       newProductList.remove(product);
     });
     String newCsv = productListToCsv(newProductList);
-    File newProductCsvFile = File("${widget.cacheDir.path}/new_products.csv");
-    if (newProductCsvFile.existsSync()) {
-      newProductCsvFile.writeAsStringSync(newCsv);
+    File newProductCsvFile = File("${widget.cacheDir.path}${Platform.pathSeparator}new_products.csv");
+    if (!newProductCsvFile.existsSync()) {
+      newProductCsvFile.createSync(recursive: true);
     }
+    newProductCsvFile.writeAsStringSync(newCsv);
   }
 
   @override
@@ -1406,13 +1380,13 @@ class SecureCredentialStorage {
   }
 
   static Future<String> getUserKey() async {
-    String apiDevKey = await getApiKey();
+    String apiDevKey = await _storage.read(key: _apiKey) ?? "";
     if (apiDevKey.length == 0) return "";
 
-    String username = await getUsername();
+    String username = await _storage.read(key: _usernameKey) ?? "";
     if (username.length == 0) return "";
 
-    String password = await getPassword();
+    String password = await _storage.read(key: _passwordKey) ?? "";
     if (password.length == 0) return "";
 
     final response = await http.post(
@@ -1440,28 +1414,24 @@ class ApiKeyPage extends StatefulWidget {
 }
 
 class _ApiKeyPageState extends State<ApiKeyPage> {
-  final TextEditingController _controller = TextEditingController();
-  String _savedApiKey = "";
+  final TextEditingController _controller = TextEditingController(text: "");
   bool _isObscure = true;
+  bool _apiKeySaved = false;
 
   @override
   void initState() {
     super.initState();
-    _loadApiKey();
-  }
-
-  Future<void> _loadApiKey() async {
-    String apiKey = await SecureCredentialStorage.getApiKey();
-    setState(() {
-      _savedApiKey = apiKey;
-      _controller.text = apiKey;
+    SecureCredentialStorage.getApiKey().then((String apiKey) {
+      setState(() {
+        _apiKeySaved = apiKey.length > 0;
+      });
     });
   }
 
   Future<void> _saveApiKey() async {
     await SecureCredentialStorage.saveApiKey(_controller.text);
     setState(() {
-      _savedApiKey = _controller.text;
+      _controller.text = "";
     });
   }
 
@@ -1506,7 +1476,7 @@ class _ApiKeyPageState extends State<ApiKeyPage> {
             ),
             const SizedBox(height: 20),
             Text(
-              _savedApiKey.length != 0 ? "API Key Saved Securely" : "No API Key Saved",
+              _apiKeySaved ? "API Key Saved Securely" : "No API Key Saved",
               style: const TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.bold,
@@ -1529,45 +1499,37 @@ class CredentialPage extends StatefulWidget {
 class _CredentialPageState extends State<CredentialPage> {
   final TextEditingController _usernameController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
-  String _savedUsername = "";
-  String _savedPassword = "";
+  bool _isUsernameSaved = false;
+  bool _isPasswordSaved = false;
   bool _isUsernameObscure = true;
   bool _isPasswordObscure = true;
 
   @override
   void initState() {
     super.initState();
-    _loadUsername();
-    _loadPassword();
-  }
-
-  Future<void> _loadUsername() async {
-    String username = await SecureCredentialStorage.getUsername();
-    setState(() {
-      _savedUsername = username;
-      _usernameController.text = username;
+    SecureCredentialStorage.getUsername().then((String username) {
+      setState(() {
+        _isUsernameSaved = username.length > 0;
+      });
+    });
+    SecureCredentialStorage.getPassword().then((String password) {
+      setState(() {
+        _isPasswordSaved = password.length > 0;
+      });
     });
   }
 
   Future<void> _saveUsername() async {
     await SecureCredentialStorage.saveUsername(_usernameController.text);
     setState(() {
-      _savedUsername = _usernameController.text;
-    });
-  }
-
-  Future<void> _loadPassword() async {
-    String password = await SecureCredentialStorage.getPassword();
-    setState(() {
-      _savedPassword = password;
-      _passwordController.text = password;
+      _usernameController.text = "";
     });
   }
 
   Future<void> _savePassword() async {
     await SecureCredentialStorage.savePassword(_passwordController.text);
     setState(() {
-      _savedPassword = _passwordController.text;
+      _passwordController.text = "";
     });
   }
 
@@ -1632,14 +1594,14 @@ class _CredentialPageState extends State<CredentialPage> {
             ),
             const SizedBox(height: 20),
             Text(
-              _savedUsername.length != 0 ? "Username Saved Securely" : "No Username Saved",
+              _isUsernameSaved ? "Username Saved Securely" : "No Username Saved",
               style: const TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.bold,
               ),
             ),
             Text(
-              _savedPassword.length != 0 ? "Password Saved Securely" : "No Password Saved",
+              _isPasswordSaved ? "Password Saved Securely" : "No Password Saved",
               style: const TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.bold,
