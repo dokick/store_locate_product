@@ -114,23 +114,24 @@ void main() async {
 
   final Directory appCacheDir = await path.getApplicationCacheDirectory();
   appCacheDir.createSync(recursive: true);
-  print("Cache directory found");
-  print("cache: $appCacheDir");
+  if (kDebugMode) {
+    print("Cache directory found");
+    print("cache: $appCacheDir");
+  }
   Directory csvDbDir = Directory("${appCacheDir.path}${Platform.pathSeparator}csv_db");
   csvDbDir.createSync(recursive: true);
 
-  // x0 and a are orthogonal to the entrance and y0 and b are parallel
-  // In location.csv y0, y0, a and b are given in centimeters
+  // In locations.csv x0, y0, a and b are given in centimeters
   File locationListFile = File(getLocationListPath(csvDbDir));
-  if (!locationListFile.existsSync() || true) {  // TODO: Remember to delete || true
-    print("Location list file created");
+  if (!locationListFile.existsSync()) {  // TODO: Remember to delete || true
+    // print("Location list file created");
     locationListFile.createSync(recursive: true, exclusive: false);  // TODO: Remember to change exclusive: true
     locationListFile.writeAsStringSync("id;floor;x0;y0;a;b");
   }
 
   File productListFile = File(getProductListPath(csvDbDir));
-  if (!productListFile.existsSync() || true) {  // TODO: Remember to delete || true
-    print("Product list file created");
+  if (!productListFile.existsSync()) {  // TODO: Remember to delete || true
+    // print("Product list file created");
     productListFile.createSync(recursive: true, exclusive: false);  // TODO: Remember to change exclusive: true
     productListFile.writeAsStringSync("product_id;location_id");
   }
@@ -276,8 +277,6 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   late TabController _floors;
-  bool locationsLoaded = false;
-  bool productsLoaded = false;
   List<Location> locationList = [];
   List<Product> productList = [];
   int wantedLocationId = -1;
@@ -288,10 +287,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _floors = TabController(length: 3, vsync: this);
   }
 
-  Future<List<Location>> _loadLocations() async {
+  Future<void> _loadLocations() async {
     final fields = await readCsv(getLocationListPath(widget.cacheDir));
-    return fields
-      .map((List location) {
+    List<Location> _locations = fields.map((List location) {
         Floor floor = Floor.ground;
         switch (location[1]) {
           case 0:
@@ -311,12 +309,17 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           a: location[4].toInt(),
           b: location[5].toInt(),
         );
-      })
-      .toList();
+      }).toList();
+    setState(() {
+      locationList = _locations;
+    });
   }
 
-  Future<List<Product>> _loadProducts() async {
-    return await readProductList(getProductListPath(widget.cacheDir));
+  Future<void> _loadProducts() async {
+    List<Product> _products = await readProductList(getProductListPath(widget.cacheDir));
+    setState(() {
+      productList = _products;
+    });
   }
 
   Floor _locateProduct(String productId) {
@@ -329,7 +332,14 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       }
     }
     Floor productFloor = Floor.ground;
-    if (locationId == -1) return productFloor;  // early return, because product id couldn't be found
+    if (locationId == -1) {
+      // UI update needed, because wantedLocationId could already have a value, but if no product id was found
+      // wantedLocationId needs a reset
+      setState(() {
+        wantedLocationId = locationId;
+      });
+      return productFloor;
+    };  // early return, because product id couldn't be found
     for (Location location in locationList) {
       if (location.id == locationId) {
         productFloor = location.floor;
@@ -356,7 +366,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         }
       }
     } catch (e) {
-      print('Error downloading file: $e');
+      if (kDebugMode) {
+        print('Error downloading file: $e');
+      }
     }
 
     try {
@@ -372,14 +384,16 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         }
       }
     } catch (e) {
-      print('Error downloading file: $e');
+      if (kDebugMode) {
+        print('Error downloading file: $e');
+      }
     }
 
   }
 
   @override
   Widget build(BuildContext context) {
-    Widget searchBar = SearchAnchor(
+    SearchAnchor searchBar = SearchAnchor(
       builder: (BuildContext context, SearchController controller) {
         return platform_widgets.PlatformIconButton(
           icon: const Icon(Icons.search),
@@ -397,32 +411,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _floors.animateTo(floorToInt(floor));
       },
     );
-
-    if (!locationsLoaded) {
-      _loadLocations().then((List<Location> location) {
-        setState(() {
-          locationList = location;
-          locationsLoaded = true;
-        });
-        if (kDebugMode) {
-          print("Locations loaded");
-          print(locationList);
-        }
-      });
-    }
-
-    if (!productsLoaded) {
-      _loadProducts().then((List<Product> products) {
-        setState(() {
-          productList = products;
-          productsLoaded = true;
-        });
-        if (kDebugMode) {
-          print("Products loaded");
-          print(productList);
-        }
-      });
-    }
 
     List<Location> groundFloorLayoutList = locationList
       .where((Location location) => location.floor == Floor.ground)
@@ -459,36 +447,30 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         actions: [
           platform_widgets.PlatformIconButton(
             icon: const Icon(Icons.sync),
-            onPressed: () async {
-              await _downloadAndReplace();
-              _loadLocations().then((List<Location> locations) {
-                setState(() {
-                  locationList = locations;
-                });
-              });
-              _loadProducts().then((List<Product> products) {
-                setState(() {
-                  productList = products;
-                });
+            onPressed: () {
+              _downloadAndReplace().then((_) async {
+                await _loadLocations();
+                await _loadProducts();
               });
             },
           ),
           platform_widgets.PlatformIconButton(
             icon: const Icon(Icons.camera_alt_outlined),
-            onPressed: () async {
-              List<camera.CameraController> cameraControllers = await initializeCamera();
-              if (cameraControllers.length == 1) {
-                camera.CameraController cameraController = cameraControllers[0];
-                String productId = await Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => TextRecognitionView(cameraController: cameraController),
-                  ),
-                );
-                Floor floor = _locateProduct(productId);
-                _floors.animateTo(floorToInt(floor));
-              }
-              // TODO: impl
+            onPressed: () {
+              // List<camera.CameraController> cameraControllers = await initializeCamera();
+              initializeCamera().then((List<camera.CameraController> cameraControllers) async {
+                if (cameraControllers.length == 1) {
+                  camera.CameraController cameraController = cameraControllers[0];
+                  String productId = await Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => TextRecognitionView(cameraController: cameraController),
+                    ),
+                  );
+                  Floor floor = _locateProduct(productId);
+                  _floors.animateTo(floorToInt(floor));
+                }
+              });
             },
           ),
           searchBar
@@ -508,11 +490,11 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           ],
         ),
       ),
-      body: locationsLoaded ? TabBarView(
+      body: TabBarView(
         controller: _floors,
         children: <Widget>[
           FloorLayout(
-            key: ValueKey(wantedLocationId + 0),
+            key: ValueKey(wantedLocationId + 0),  // Force re-render if value changes
             floor: Floor.ground,
             locationList: groundFloorLayoutList,
             productList: productList,
@@ -520,7 +502,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             wantedLocationId: wantedLocationId,
           ),
           FloorLayout(
-            key: ValueKey(wantedLocationId + 1),
+            key: ValueKey(wantedLocationId + 1),  // Force re-render if value changes
             floor: Floor.first,
             locationList: firstFloorLayoutList,
             productList: productList,
@@ -528,7 +510,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             wantedLocationId: wantedLocationId,
           ),
           FloorLayout(
-            key: ValueKey(wantedLocationId + 2),
+            key: ValueKey(wantedLocationId + 2),  // Force re-render if value changes
             floor: Floor.second,
             locationList: secondFloorLayoutList,
             productList: productList,
@@ -536,7 +518,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             wantedLocationId: wantedLocationId,
           ),
         ],
-      ) : Text("Loading ..."),
+      ),
     );
   }
 }
@@ -701,7 +683,6 @@ class _TextRecognitionViewState extends State<TextRecognitionView> {
                         });
 
                         await captureAndRecognizeText();
-                        // TODO: send this to new_products.csv
 
                         await Future.delayed(Duration(milliseconds: 200), () {
                           setState(() {
@@ -805,7 +786,9 @@ class _FloorLayoutState extends State<FloorLayout> {
             builder: (BuildContext dialogContext) {
               return AlertDialog(
                 title: const Text("Deleting location"),
-                content: const Text("Do you want to delete this location?"),
+                content: const Text(
+                  "Do you want to delete this location? (Feature not implemented yet and will probably never be)",
+                ),
                 actions: <Widget>[
                   platform_widgets.PlatformTextButton(
                     child: const Text("Cancel"),
@@ -1043,7 +1026,7 @@ class _RackProductListState extends State<RackProductList> {
             onPressed: () async {
               List<camera.CameraController> _cameraControllers = await initializeCamera();
               if (_cameraControllers.length > 0) {
-                String productId = await Navigator.push(
+                String receivedProductId = await Navigator.push(
                   context,
                   MaterialPageRoute(
                     builder: (context) {
@@ -1053,41 +1036,17 @@ class _RackProductListState extends State<RackProductList> {
                     },
                   ),
                 );
-                _addToNewProductList(productId);
+                _addToNewProductList(receivedProductId);
               }
-              // TODO: impl
             },
           ),
           platform_widgets.PlatformIconButton(
             icon: const Icon(Icons.add),
             onPressed: () async {
-              // Navigator.push(
-              //   context,
-              //   MaterialPageRoute(
-              //     builder: (context) => AlertDialog(
-              //       title: const Text("Enter Product ID"),
-              //       content: TextField(
-              //         controller: textController,
-              //       ),
-              //       actions: [
-              //         TextButton(
-              //           onPressed: () => Navigator.pop(context, ""),
-              //           child: const Text("Cancel"),
-              //         ),
-              //         ElevatedButton(
-              //           onPressed: () => Navigator.pop(context, textController.text),
-              //           child: const Text("Submit"),
-              //         ),
-              //       ],
-              //     ),
-              //   ),
-              // );
-
               String receivedProductId = await _showProductIdEntryDialog(context);
               if (_validateProductId(receivedProductId)) {
                 _addToNewProductList(receivedProductId);
               }
-              // TODO: impl
             },
           ),
         ],
@@ -1147,7 +1106,6 @@ class _SettingsPageState extends State<SettingsPage> {
                   ),
                 ),
               );
-              // TODO: impl
             },
           ),
           platform_widgets.PlatformTextButton(
@@ -1207,9 +1165,9 @@ class _UpdateProductsPageState extends State<UpdateProductsPage> {
   @override
   void initState() {
     super.initState();
-    readProductList("${widget.cacheDir.path}/new_products.csv").then((List<Product> productList) {
+    readProductList("${widget.cacheDir.path}${Platform.pathSeparator}new_products.csv").then((List<Product> _products) {
       setState(() {
-        newProductList = productList;
+        newProductList = _products;
       });
     });
   }
@@ -1218,10 +1176,13 @@ class _UpdateProductsPageState extends State<UpdateProductsPage> {
     // This method assumes that the updated products are correct and products can only have one location
     // This means previous locations, even if true, will be overwritten
     List<Product> currentProductList = await readProductList(getProductListPath(widget.cacheDir));
-    print("Original length: ${currentProductList.length}");
-
+    if (kDebugMode) {
+      print("Original length: ${currentProductList.length}");
+    }
     Map<String, Product> currentProductMap = {for (Product product in currentProductList) product.id: product};
-    print("New products length: ${currentProductMap.length}");
+    if (kDebugMode) {
+      print("New products length: ${currentProductMap.length}");
+    }
 
     for (Product product in newProductList) {
       // -1 indicates that the product id should be deleted entirely (possible that product is out of stock)
@@ -1280,8 +1241,9 @@ class _UpdateProductsPageState extends State<UpdateProductsPage> {
         newProductCsvFile.writeAsStringSync("product_id;location_id");
         final responsePointer = await http.get(Uri.parse("https://pastebin.com/raw/uZ4MzZdT"));
         if (responsePointer.statusCode == 200) {
+          // Old paste gets deleted
           final deleteResponse = await http.post(
-            Uri.parse("https://pastebin.com/api/api_login.php"),
+            Uri.parse("https://pastebin.com/api/api_post.php"),
             body: {
               "api_dev_key": apiDevKey,
               "api_user_key": apiUserKey,
@@ -1290,14 +1252,17 @@ class _UpdateProductsPageState extends State<UpdateProductsPage> {
             },
           );
           if (deleteResponse.statusCode == 200) {
-            print("Old paste successfully deleted");
+            // print("Old paste successfully deleted");
+            setState(() {
+              newProductList = [];
+            });
           }
         }
-        // TODO: delete old paste
-        return;
       }
     } catch (e) {
-      print("Exception during upload occurred: $e");
+      if (kDebugMode) {
+        print("Exception during upload occurred: $e");
+      }
     }
   }
 
@@ -1339,7 +1304,6 @@ class _UpdateProductsPageState extends State<UpdateProductsPage> {
               icon: const Icon(Icons.delete),
               onPressed: () {
                 updateNewProductsCsvFile(product);
-                // TODO: impl
               },
             ),
           );
@@ -1351,16 +1315,17 @@ class _UpdateProductsPageState extends State<UpdateProductsPage> {
 
 class SecureCredentialStorage {
   static const _storage = secure_storage.FlutterSecureStorage();
-  static const _apiKey = "pastebin_api_key";
+  static const _apiDevKey = "pastebin_api_key";
+  static const _apiUserKey = "pastebin_api_user_key";
   static const _usernameKey = "pastebin_user_key";
   static const _passwordKey = "pastebin_password_key";
 
   static Future<void> saveApiKey(String apiKey) async {
-    await _storage.write(key: _apiKey, value: apiKey);
+    await _storage.write(key: _apiDevKey, value: apiKey);
   }
 
   static Future<String> getApiKey() async {
-    return await _storage.read(key: _apiKey) ?? "";
+    return await _storage.read(key: _apiDevKey) ?? "";
   }
 
   static Future<void> savePassword(String password) async {
@@ -1380,7 +1345,10 @@ class SecureCredentialStorage {
   }
 
   static Future<String> getUserKey() async {
-    String apiDevKey = await _storage.read(key: _apiKey) ?? "";
+    String apiUserKey = await _storage.read(key: _apiUserKey) ?? "";
+    if (apiUserKey.isNotEmpty) return apiUserKey;
+
+    String apiDevKey = await _storage.read(key: _apiDevKey) ?? "";
     if (apiDevKey.length == 0) return "";
 
     String username = await _storage.read(key: _usernameKey) ?? "";
@@ -1399,10 +1367,10 @@ class SecureCredentialStorage {
     );
 
     if (response.statusCode == 200 && response.body.isNotEmpty) {
+      await _storage.write(key: _apiUserKey, value: response.body);
       return response.body;
-    } else {
-      return "";
     }
+    return "";
   }
 }
 
