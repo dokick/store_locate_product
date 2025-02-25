@@ -236,6 +236,7 @@ Future<List<camera.CameraController>> initializeCamera() async {
 
   // await controller.setExposureMode(camera.ExposureMode.locked);
   // await controller.setFocusMode(camera.FocusMode.locked);
+  await controller.lockCaptureOrientation(DeviceOrientation.landscapeRight);
 
   return [controller];
 }
@@ -285,6 +286,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   void initState() {
     super.initState();
     _floors = TabController(length: 3, vsync: this);
+    _loadLocations().then((_) => setState(() {}));
+    _loadProducts().then((_) => setState(() {}));
   }
 
   Future<void> _loadLocations() async {
@@ -492,6 +495,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       ),
       body: TabBarView(
         controller: _floors,
+        physics: const NeverScrollableScrollPhysics(),
         children: <Widget>[
           FloorLayout(
             key: ValueKey(wantedLocationId + 0),  // Force re-render if value changes
@@ -882,13 +886,17 @@ class _FloorLayoutState extends State<FloorLayout> {
 
     return Padding(
       padding: const EdgeInsets.all(8.0),
-      child: GestureDetector(
-        onTapDown: onTapDown,
-        onTapUp: onTapUp,
-        onTapCancel: onTapCancel,
-        child: CustomPaint(
-          painter: RackPainter(racks: racks, wantedLocationId: widget.wantedLocationId),
-          child: SizedBox.expand(), // Expands to fill the available space
+      child: InteractiveViewer(
+        minScale: 1.0,
+        maxScale: 2.5,
+        child: GestureDetector(
+          onTapDown: onTapDown,
+          onTapUp: onTapUp,
+          onTapCancel: onTapCancel,
+          child: CustomPaint(
+            painter: RackPainter(racks: racks, wantedLocationId: widget.wantedLocationId),
+            child: SizedBox.expand(), // Expands to fill the available space
+          ),
         ),
       ),
     );
