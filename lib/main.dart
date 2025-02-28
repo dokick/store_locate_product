@@ -124,19 +124,20 @@ void main() async {
 
   // In locations.csv x0, y0, a and b are given in centimeters
   File locationsFile = File(getLocationListPath(csvDbDir));
-  if (!locationsFile.existsSync()) {  // TODO: Remember to delete || true
+  if (!locationsFile.existsSync()) {
     // print("Location list file created");
     locationsFile.createSync(recursive: true, exclusive: false);  // TODO: Remember to change exclusive: true
     locationsFile.writeAsStringSync("id;floor;x0;y0;a;b");
   }
 
   File productsFile = File(getProductListPath(csvDbDir));
-  if (!productsFile.existsSync()) {  // TODO: Remember to delete || true
+  if (!productsFile.existsSync()) {
     // print("Product list file created");
     productsFile.createSync(recursive: true, exclusive: false);  // TODO: Remember to change exclusive: true
     productsFile.writeAsStringSync("product_id;location_id");
   }
 
+  // TODO: More use of flutter_platform_widgets
   runApp(
     StoreLocateProduct(
       cacheDir: csvDbDir,
@@ -159,11 +160,11 @@ int findLowestAvailableIndex(List<Location> locations) {
 }
 
 String getLocationListPath(Directory cacheDir) {
-  return "${cacheDir.path}/$locationListFilename";
+  return "${cacheDir.path}${Platform.pathSeparator}$locationListFilename";
 }
 
 String getProductListPath(Directory cacheDir) {
-  return "${cacheDir.path}/$productListFilename";
+  return "${cacheDir.path}${Platform.pathSeparator}$productListFilename";
 }
 
 int floorToInt(Floor floor) {
@@ -365,6 +366,12 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       if (response.statusCode == 200) {
         final file = File(getLocationListPath(widget.cacheDir));
         await file.writeAsString(response.body);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Downloaded locations successfully"),
+            duration: Duration(seconds: 1),
+          )
+        );
         if (kDebugMode) {
           print('Downloaded locations.csv and replaced');
         }
@@ -382,6 +389,12 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         if (response.statusCode == 200) {
           final file = File(getProductListPath(widget.cacheDir));
           await file.writeAsString(response.body);
+          ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text("Downloaded products successfully"),
+                duration: Duration(seconds: 1),
+              )
+          );
           if (kDebugMode) {
             print('Downloaded products.csv and replaced');
           }
@@ -454,7 +467,19 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             onPressed: () {
               _downloadAndReplace().then((_) async {
                 await _loadLocations();
+                ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text("Locations loaded"),
+                      duration: Duration(seconds: 1),
+                    )
+                );
                 await _loadProducts();
+                ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text("Products loaded"),
+                      duration: Duration(seconds: 1),
+                    )
+                );
               });
             },
           ),
@@ -824,7 +849,7 @@ class _FloorLayoutState extends State<FloorLayout> {
 
       for (int i = 0; i < locationRects.length; i++) {
         if (locationRects[i].rect.contains(tapPosition)) {
-          List<Product> productListFiltered = widget.products
+          List<Product> filteredProducts = widget.products
             .where(
               (Product product) => product.locationId == locationRects[i].id,
             )
@@ -835,7 +860,7 @@ class _FloorLayoutState extends State<FloorLayout> {
             MaterialPageRoute(
               builder: (context) => ProductListPerLocation(
                 locationId: locationRects[i].id,
-                products: productListFiltered,
+                products: filteredProducts,
                 cacheDir: widget.cacheDir,
               ),
             ),
@@ -1028,7 +1053,7 @@ class _ProductListPerLocationState extends State<ProductListPerLocation> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text("Product List (ID: ${widget.locationId})"),
+        title: Text("Products [ID: ${widget.locationId}]"),
         actions: [
           platform_widgets.PlatformIconButton(
             icon: const Icon(Icons.camera_alt_outlined),
@@ -1046,6 +1071,12 @@ class _ProductListPerLocationState extends State<ProductListPerLocation> {
                   ),
                 );
                 _addToNewProductList(receivedProductId);
+                ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text("Product added successfully"),
+                      duration: Duration(seconds: 1),
+                    )
+                );
               }
             },
           ),
@@ -1055,6 +1086,12 @@ class _ProductListPerLocationState extends State<ProductListPerLocation> {
               String receivedProductId = await _showProductIdEntryDialog(context);
               if (_validateProductId(receivedProductId)) {
                 _addToNewProductList(receivedProductId);
+                ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text("Product added successfully"),
+                      duration: Duration(seconds: 1),
+                    )
+                );
               }
             },
           ),
@@ -1070,6 +1107,12 @@ class _ProductListPerLocationState extends State<ProductListPerLocation> {
               icon: const Icon(Icons.delete),
               onPressed: () async {
                 await deleteLocationIdFromProduct(productId);
+                ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text("Deleted product successfully"),
+                      duration: Duration(seconds: 1),
+                    )
+                );
               },
             ),
           );
@@ -1221,12 +1264,29 @@ class _UpdateProductsPageState extends State<UpdateProductsPage> {
 
   Future<void> uploadNewProductsToPastebin() async {
     String apiDevKey = await SecureCredentialStorage.getApiKey();
-    if (apiDevKey.length == 0) return;
-    String apiUserKey = await SecureCredentialStorage.getUserKey();
-    if (apiUserKey.length == 0) return;
+    if (apiDevKey.length == 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("No API Key set"),
+            duration: Duration(seconds: 1),
+          )
+      );
+      return;
+    }
 
-    List<Product> mergedProductList = await mergeUpdatedProductLists();
-    String newCsvProductList = productListToCsv(mergedProductList);
+    String apiUserKey = await SecureCredentialStorage.getUserKey();
+    if (apiUserKey.length == 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("No or incorrect username or password set"),
+            duration: Duration(seconds: 1),
+          )
+      );
+      return;
+    }
+
+    List<Product> mergedProducts = await mergeUpdatedProductLists();
+    String newCsvProducts = productListToCsv(mergedProducts);
 
     try {
       final response = await http.post(
@@ -1234,7 +1294,7 @@ class _UpdateProductsPageState extends State<UpdateProductsPage> {
         body: {
           "api_dev_key": apiDevKey,
           "api_option": "paste",
-          "api_paste_code": newCsvProductList,
+          "api_paste_code": newCsvProducts,
           "api_user_key": apiUserKey,
           "api_paste_name": "products.csv",
           "api_paste_private": "0",
@@ -1244,6 +1304,12 @@ class _UpdateProductsPageState extends State<UpdateProductsPage> {
       );
       // If successful, new_products.csv gets a reset and old paste gets deleted
       if (response.statusCode == 200) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text("Upload successfully"),
+              duration: Duration(seconds: 1),
+            )
+        );
         File newProductCsvFile = File("${widget.cacheDir.path}${Platform.pathSeparator}new_products.csv");
         if (!newProductCsvFile.existsSync()) {
           newProductCsvFile.createSync(recursive: true);
@@ -1262,6 +1328,12 @@ class _UpdateProductsPageState extends State<UpdateProductsPage> {
             },
           );
           if (deleteResponse.statusCode == 200) {
+            ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text("Deleted old products successfully"),
+                  duration: Duration(seconds: 1),
+                )
+            );
             // print("Old paste successfully deleted");
             setState(() {
               newProducts = [];
@@ -1270,6 +1342,12 @@ class _UpdateProductsPageState extends State<UpdateProductsPage> {
         }
       }
     } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Uploading new products failed"),
+            duration: Duration(seconds: 1),
+          )
+      );
       if (kDebugMode) {
         print("Exception during upload occurred: $e");
       }
