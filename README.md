@@ -2,8 +2,8 @@
 
 This app locates products in a retail store via a product id.
 
-Note: This is a private app/project. I was not paid.
-This app was not ordered by any company, corporation, etc.
+Note: This is a private app/project. This app was not ordered by any company, corporation, etc.
+even though it solves a problem usually occurring in retail
 
 ## Copyright notice
 

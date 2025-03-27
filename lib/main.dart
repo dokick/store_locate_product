@@ -251,13 +251,13 @@ class StoreLocateProduct extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'HM Wilma',
+      title: 'Store Locate Product',
       theme: ThemeData(
         colorScheme: ColorScheme.dark(brightness: Brightness.dark),
         useMaterial3: true,
       ),
       home: HomePage(
-        title: 'HM Wilma Locate Product',
+        title: 'Store Locate Product',
         cacheDir: cacheDir,
       ),
     );
